@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="/favicon.ico">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#142F40">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>ویرایشگر Word | آرشیو اسناد</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* One document in ONLYOFFICE (office.go, office.js): a slim bar with its
+     name and versions, and the editor filling everything below the app bar. */
+  main.of { position: fixed; inset: var(--appbar-h, 56px) 0 0 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr);
+    background: var(--bg); z-index: calc(var(--z-sticky) - 1); }
+  .of-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s2);
+    padding: 6px max(var(--s3), env(safe-area-inset-right, 0px)) 6px max(var(--s3), env(safe-area-inset-left, 0px));
+    border-bottom: 1px solid var(--line-soft); }
+  .of-bar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(60vw, 720px); }
+  .of-bar .spacer { flex: 1 1 auto; }
+  main.of > .err { margin: var(--s2) var(--s3) 0; }
+  .of-frame { position: relative; min-height: 0; }
+  .of-frame > iframe, .of-frame > div { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .of-wait { display: grid; place-items: center; color: var(--fg-muted); }
+  dialog.of-dialog { width: min(640px, 96vw); max-height: 86vh; padding: 0; border: 1px solid var(--line);
+    border-radius: var(--radius-lg, 12px); background: var(--bg); color: var(--fg); }
+  dialog.of-dialog::backdrop { background: rgb(0 0 0 / .5); }
+  .of-dialog-body { padding: var(--s4); display: grid; gap: var(--s3); overflow-y: auto; max-height: calc(86vh - 64px); }
+  .of-dialog-body h2 { margin: 0; font-size: var(--text-lg); }
+  .of-dialog-foot { display: flex; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
+  .of-vers { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .of-vers li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s2); padding: 8px 10px;
+    background: var(--surface); border-radius: var(--radius); }
+  .of-vers li > span { flex: 1 1 220px; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <h1 class="sr-only">ویرایشگر Word</h1>
+  <span class="spacer"></span>
+</header>
+<script src="/nav.js"></script>
+<script>window.bootNav();</script>
+
+<main id="main" class="of">
+  <div class="of-bar">
+    <a class="btn btn-ghost btn-sm" id="ofBack" href="/">بازگشت</a>
+    <b id="ofName">در حال باز کردن…</b>
+    <span class="hint" id="ofMode"></span>
+    <span class="spacer"></span>
+    <button class="btn btn-sm" id="ofVersions" type="button" hidden>نسخه‌های پیشین</button>
+  </div>
+  <div class="err" id="ofMsg" role="alert" hidden></div>
+  <div class="of-frame"><div class="of-wait" id="ofEditor">در حال باز کردن ویرایشگر…</div></div>
+</main>
+
+<dialog class="of-dialog" id="ofVer" aria-labelledby="ofVerTitle">
+  <div class="of-dialog-body">
+    <h2 id="ofVerTitle">نسخه‌های پیشین</h2>
+    <p class="hint">هر بار که سند ذخیره می‌شود، نسخهٔ پیش از آن این‌جا نگه داشته می‌شود.</p>
+    <ul class="of-vers" id="ofVerList"></ul>
+  </div>
+  <div class="of-dialog-foot"><button class="btn btn-ghost" type="button" id="ofVerClose">بستن</button></div>
+</dialog>
+
+<script src="/datepick.js"></script>
+<script src="/office.js"></script>
+</body>
+</html>

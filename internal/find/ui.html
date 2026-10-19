@@ -1,0 +1,2570 @@
+<!doctype html>
+<!-- Right-to-left chrome, left-to-right contents.
+     ------------------------------------------
+     The interface is in English and stays in English: these are Word and PDF
+     files whose names, reference numbers and folder names are Latin, and this
+     page exists so somebody can match a number here against the same number
+     in Explorer or in ProcessMaker. Translating it would break that job.
+
+     The direction is a separate question from the language, and it was
+     answered wrongly. This page sat left-to-right while every other page in
+     the application is right-to-left, so the folder tree was on the left here
+     and the menu drawer on the right, and moving between the archive and the
+     settings meant the whole layout jumped sides. Now the frame is mirrored
+     like everything else and the English reads left-to-right inside it.
+
+     Two things are pinned against the mirror rather than following it: the
+     rendered document (see .sheet -- a Word file's tables and tab stops must
+     come out as they were authored) and the fields and identifiers where a
+     stray bracket or ellipsis would otherwise change ends (see the
+     "identifiers" block). Everything else is laid out with logical
+     properties, so it mirrors without a rule of its own. -->
+<html lang="en" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="/favicon.ico">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#142F40">
+<!--
+  iOS ignores the manifest for "Add to Home Screen" and reads these instead;
+  without them the installed app is a bookmark that opens in Safari's chrome
+  with a screenshot for an icon.
+-->
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="آرشیو اسناد">
+<title>Document Archive</title>
+<!--
+  One stylesheet for the whole application. This page used to carry its own
+  pre-compiled Tailwind build, which is why it looked like a different product
+  from the other pages: different palette, different direction, different
+  radii. Worse, that build was purged against the markup as it stood, so any
+  class not already present -- every responsive variant, most spacing steps --
+  silently did nothing.
+
+  Everything below is what only this page needs: the three-pane layout, the
+  folder tree, and the rendered document.
+-->
+<link rel="stylesheet" href="/app.css">
+<style>
+  html, body { height: 100%; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden;
+    /* The Latin stack, not the Persian one the other pages use.
+       B Nazanin and B Zar draw ASCII digits with Persian glyphs, so "125-156"
+       rendered as "۱۲۵-۱۵۶" -- the value was right and the shapes were wrong,
+       which is worse than either, because the number on screen no longer
+       matches the one in Explorer. */
+    font-family: var(--font-latin);
+    /* Chrome is not text; selecting it by accident while dragging through
+       results is noise. The document itself opts back in below. */
+    user-select: none; -webkit-user-select: none;
+  }
+  /* .brand-name used to be in this list, from when this page had a brand of
+     its own. It is now only the drawer's title, which is Persian -- and the
+     Latin stack draws Persian badly or not at all, so forcing it there was
+     making the one piece of Persian on this page the worst-set text on it. */
+  h1, h2, h3 { font-family: var(--font-latin); font-weight: 600; }
+  /* Nothing on this screen may inherit a Persian face. Those fonts draw ASCII
+     digits with Persian glyphs, so a reference number correct in the DOM still
+     appeared wrong on screen -- and this page exists to match numbers against
+     Explorer and ProcessMaker. */
+  #app, #setup, .node, .row-item, .doc-bar, button, input, select, table {
+    font-family: var(--font-latin);
+  }
+  .input, input { user-select: text; -webkit-user-select: text; }
+
+  /* ---------------------------------------------------------- shell */
+  #app { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #setup { flex: 1; display: flex; align-items: center; justify-content: center;
+           padding: var(--s6); overflow: auto; }
+  .panes { flex: 1; display: flex; min-height: 0; }
+
+  #side {
+    width: 244px; flex: none; overflow-y: auto; padding: var(--s2);
+    background: var(--surface); border-inline-end: 1px solid var(--line-soft);
+  }
+  #list {
+    width: 36%; min-width: 300px; overflow-y: auto; padding: var(--s2);
+    border-inline-end: 1px solid var(--line-soft);
+  }
+  #view { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }
+
+  /* --------------------------------------------------- folder tree */
+  .nav-sect {
+    padding: 10px 10px 5px;
+    font: 650 10.5px/1 var(--font-latin);
+    letter-spacing: .07em; text-transform: uppercase; color: var(--fg-faint);
+  }
+  /* A real tree: every level has a vertical trunk running through it and a
+     short elbow reaching out to each row. Indentation alone left it ambiguous
+     which reference a category belonged to once three levels were open. */
+  .node {
+    position: relative;
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 10px; margin-bottom: 1px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-base); color: var(--fg-muted);
+    cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  .node:hover { background: var(--surface-2); color: var(--fg); }
+  /* The lifted orange, not the base one: this sits on an accent tint over
+     --surface, where the base measures 3.5:1 and this is body-sized text. */
+  .node.on { background: var(--accent-soft); color: var(--accent-lift); font-weight: 600; }
+  .node:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* The twisty points at the row when closed and down when open, so its
+     direction always says what clicking will do. */
+  .node .tw {
+    width: 12px; flex: none; text-align: center; font-size: 8px;
+    color: var(--fg-faint); transition: transform var(--fast) var(--ease);
+  }
+  .node .tw.open { transform: rotate(-90deg); }
+  .node.on .tw { color: var(--accent-lift); }
+  .node .n {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Reference numbers are identifiers, so they keep Latin digits and line up
+     on them. */
+  .node .c {
+    flex: none; color: var(--fg-faint);
+    font: 500 11.5px/1.6 var(--font-latin);
+    font-variant-numeric: tabular-nums;
+  }
+  .node.on .c { color: var(--accent-lift); }
+
+  /* Trunk and elbow, drawn per level. inset-inline-start places them on the
+     right in this right-to-left page without any separate rule. */
+  .tree-ref, .tree-cat { position: relative; }
+  .tree-ref::before, .tree-cat::before {
+    content: ''; position: absolute; inset-block: -1px;
+    width: 1px; background: var(--line);
+  }
+  .tree-ref::after, .tree-cat::after {
+    content: ''; position: absolute; top: 50%;
+    width: 9px; height: 1px; background: var(--line);
+  }
+  .tree-ref  { padding-inline-start: 30px; }
+  .tree-ref::before  { inset-inline-start: 17px; }
+  .tree-ref::after   { inset-inline-start: 17px; }
+  .tree-cat  { padding-inline-start: 52px; }
+  .tree-cat::before  { inset-inline-start: 39px; }
+  .tree-cat::after   { inset-inline-start: 39px; }
+  /* The last child's trunk stops at its own elbow rather than running past
+     it into empty space. */
+  .node.last::before { bottom: 50%; inset-block-start: -1px; }
+
+  /* ------------------------------------------------------- results */
+  .row-item {
+    padding: var(--s3); margin-bottom: 6px;
+    border: 1px solid transparent; border-radius: var(--radius-lg);
+    background: var(--surface); cursor: pointer;
+    transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+  }
+  .row-item:hover { border-color: var(--line); transform: translateY(-1px); }
+  .row-item.on { border-color: var(--accent); background: var(--accent-soft); }
+  /* What the open document names (loadDocFacts), between its bar and body. */
+  .doc-facts { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); padding: var(--s2) var(--s4);
+    border-bottom: 1px solid var(--line-soft); }
+  .doc-facts .fact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+  .doc-facts .fact-k { font-size: var(--text-xs); color: var(--fg-muted); letter-spacing: .04em; text-transform: uppercase; }
+  .doc-facts button.chip { cursor: pointer; font-family: inherit; }
+  /* A broad search draws up to two hundred of these at once. The browser
+     lays out and paints only those near the screen and holds each other's
+     place by its last size, so a long list scrolls like a short one; they
+     stay in the page -- found by Ctrl+F, reached by the keyboard, read by a
+     screen reader. */
+  #list > .row-item { content-visibility: auto; contain-intrinsic-size: auto 88px; }
+  /* Deliberately not in a media query: the results pane is 369px wide on a
+     1024px desktop, the same as a phone, so this is not a width problem.
+     A file name breaks at "-" but not at "_", and these names are mostly
+     underscores. Today's longest unbreakable run is 25 characters, about
+     165px in the 318px available, so nothing overflows yet; an 85-character
+     name measured 367px in that box and pushed the row to 379px, at which
+     point the list scrolls sideways. overflow-wrap engages only on a word
+     that genuinely does not fit, so every name in the archive today lays out
+     unchanged. */
+  .row-item .ref { font-size: var(--text-md); font-weight: 650; letter-spacing: -.01em;
+                   overflow-wrap: anywhere; }
+  .row-item .meta { margin-top: 2px; font-size: var(--text-xs); color: var(--fg-faint);
+                    overflow-wrap: anywhere; }
+  /* Two lines of context, then stop: the point is to show why this document
+     matched, not to reproduce it. */
+  .snip {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; margin-top: 6px;
+    font-size: var(--text-sm); color: var(--fg-muted); line-height: 1.65;
+  }
+  mark { background: #7a5a12; color: #fff5da; border-radius: 3px; padding: 0 2px; }
+
+  /* --------------------------------------------- document viewport */
+  .doc-bar {
+    display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+    padding: 9px var(--s4);
+    border-bottom: 1px solid var(--line-soft); background: var(--surface);
+  }
+  .doc-title {
+    flex: 1; min-width: 0; margin-inline-end: auto;
+    font-size: var(--text-base); font-weight: 650;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Two mutually exclusive views of the same file, so a segmented control
+     rather than two separate buttons. */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .seg button {
+    padding: 6px 13px; border: 0; background: var(--surface-2); color: var(--fg-muted);
+    font: 500 var(--text-base)/1.2 var(--font-latin); cursor: pointer;
+    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  .seg button + button { border-inline-start: 1px solid var(--line); }
+  .seg button:hover { color: var(--fg); }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 650; }
+  #docBody { flex: 1; overflow: auto; padding: var(--s6); background: var(--bg); }
+
+  /* The rendered document keeps its own white page. A contract is a white
+     page; tinting it to match the app would misrepresent the thing somebody
+     is checking before they send it.
+
+     DIRECTION IS RIGHT-TO-LEFT, and this rule used to say the opposite.
+
+     It was written when this page was an English left-to-right screen, and it
+     pinned the sheet so a change to the chrome could not quietly mirror a Word
+     file's tables, indents and tab stops. The intent was right; the value was
+     measured against the wrong corpus. Every document in this archive is a
+     Persian business document -- quotations, invoices, guarantee letters --
+     and pinning the page left-to-right is what "the RTL still is not
+     happening in docs" was about.
+
+     What a wrong direction does to one of these is not a cosmetic tilt. The
+     label blocks in a quotation are Persian phrases ending in a colon, with a
+     dotted leader running to the value. A colon is a NEUTRAL character: it
+     belongs to the paragraph's direction, so in a left-to-right paragraph it
+     jumps to the far end of a Persian line, the leader runs the wrong way,
+     and the value lands under the wrong label.
+
+     text-align is NOT set here, and that is deliberate. docx-preview reads
+     each paragraph's own <w:jc> and emits it; an alignment declared here wins
+     over nothing and only takes away the document's own centring and
+     justification. Direction inherits where the file does not state it --
+     which is the correct default for this corpus -- and a paragraph that
+     carries <w:bidi/> still overrides it. Latin runs inside Persian survive
+     this on their own; that is what the bidi algorithm is for, and the
+     identifier rules below say the same thing in the other direction. */
+  /* LEFT-TO-RIGHT IS ONLY THE DEFAULT HERE. The real direction is set per
+     document by setDocDirection(), from the document's own text.
+
+     This archive is MIXED -- inquiry_acme_english_507-068.docx sits in the
+     same case folder as its Persian twin -- so neither direction is right as
+     a blanket rule. Pinning ltr mangled the Persian quotations; flipping the
+     pin to rtl mangled the English ones just as badly, which is the same bug
+     with the sign changed. A file is the only thing that knows which it is.
+
+     ltr is the default rather than rtl because it is what a document gets if
+     the script below never runs -- a render that throws, or the server's own
+     HTML fallback -- and because that is how this pane behaved for its whole
+     life before today. */
+  .sheet, .docx-wrapper {
+    direction: ltr;
+  }
+  .sheet[dir="rtl"], .docx-wrapper[dir="rtl"] { direction: rtl; }
+
+  /* A search highlight INSIDE the document is a different object from one in
+     the results list, and it was wearing the list's clothes.
+
+     The shared rule is dark gold behind cream text, which is correct on the
+     app's dark chrome and wrong on the white page a document is rendered on:
+     against white it reads as a solid olive block, and on a dense quotation --
+     where the marks land in a table cell and on a dotted leader line -- a row
+     of them looks like the file is corrupted rather than like the search
+     worked. Paper gets a paper highlighter: yellow behind the document's own
+     ink, so the words stay readable and the mark reads as a mark.
+
+     No padding either. Two pixels a side is invisible in a results list and
+     is not invisible inside a table cell laid out to Word's measurements --
+     it widens the cell and nudges the column. A highlight must not move the
+     thing it is highlighting. */
+  .sheet mark, .docx-wrapper mark {
+    background: #ffe9a3;
+    color: inherit;
+    padding: 0;
+    border-radius: 2px;
+    /* Print and PDF export drop backgrounds by default, which would silently
+       take the highlight away in the one place it is hardest to re-find. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---------------------------------------------------- identifiers
+     Pinned left-to-right against the page's mirror.
+
+     The page is right-to-left now and English text survives that on its own:
+     the bidi algorithm keeps a run of Latin words in Latin order. What it
+     does not keep is a NEUTRAL character at either end of the run -- a
+     bracket, a colon, an ellipsis, a trailing full stop -- which belongs to
+     the paragraph's direction and so moves to the other end of the line.
+
+     That is cosmetic in a sentence and not cosmetic here. These are the
+     elements carrying reference numbers, file names, sizes and dates: the
+     values somebody is reading off the screen to compare with Explorer or
+     ProcessMaker. "111222-156.docx" must not come back as ".docx" on the
+     wrong side, and a placeholder ending in an ellipsis must not start with
+     one.
+
+     Only the leaves are pinned, never the panes. #side and #list place their
+     dividers with border-inline-end, so they have to stay in the page's
+     direction or the line between two panes lands against the window edge
+     instead of between them.
+
+     .nav-sect is NOT in this list, and .node .n is no longer pinned either.
+     A section heading is prose, not an identifier: pinned left-to-right it
+     sat against the wrong edge of a right-to-left panel, which is what "the
+     folder titles need to be RTL" was about. And a folder's NAME is now
+     sometimes Persian ("همهٔ اسناد") and sometimes an identifier ("515",
+     "Inquiry"), so it cannot be pinned either way -- it takes its direction
+     from its own first strong character instead, which is what
+     unicode-bidi:plaintext means and is the correct tool for a field whose
+     language varies by row. The neutral-character problem the paragraph
+     above describes is exactly what plaintext solves; pinning was the
+     heavier instrument. */
+  /* DIRECTION AND ALIGNMENT ARE TWO DIFFERENT QUESTIONS. This block used to
+     answer both with one value, and that is why the folder and document
+     titles sat against the left edge of a right-to-left page.
+
+     direction decides the ORDER OF CHARACTERS INSIDE the run -- it is what
+     keeps "111222-156.docx" from coming back with its extension on the wrong
+     side, and it is the reason these elements are pinned at all.
+
+     text-align decides WHICH EDGE OF THE BOX the finished run sits against,
+     and it is a completely separate choice. Taking "left" along with "ltr"
+     was free and looked harmless while the page was left-to-right. On a
+     right-to-left page it puts every title at the far end of a wide box,
+     which is what "they're on the left" means: the text is not mirrored, it
+     is simply parked against the wrong edge, and the further the box is from
+     shrink-to-fit the further away it parks.
+
+     So the two groups below both keep ltr ordering and differ only in the
+     edge they hug. */
+
+  /* Fields the reader TYPES into, plus the counters that sit beside them.
+     These keep the left edge: a cursor belongs where the first character
+     will land, and every one of these is filled with a reference number, a
+     count or an account name rather than with prose. */
+  .node .c, #count,
+  input, .input, select, textarea {
+    direction: ltr;
+    text-align: left;
+  }
+
+  /* Titles. Same left-to-right ordering, opposite edge -- they are headings
+     on a right-to-left page and belong against its leading edge, beside the
+     twisty and the card's starting corner rather than a screen-width away. */
+  .doc-title, .doc-meta, .row-item {
+    direction: ltr;
+    text-align: right;
+  }
+
+  /* A folder NAME is sometimes Persian and sometimes an identifier, so its
+     ORDER is still taken from its own first strong character -- that is what
+     plaintext is for and it stays.
+
+     Its ALIGNMENT cannot be, and text-align:start was the bug. Under
+     unicode-bidi:plaintext, "start" resolves per line against the direction
+     that line was detected as, not against the page. Almost every folder here
+     is named with digits -- 100, 515, 1002 -- and a digit is a WEAK character,
+     not a strong one, so plaintext finds nothing to go on, falls back to
+     left-to-right, and "start" comes out as LEFT on a right-to-left page.
+     Naming them in Persian would have hidden it; naming them in numbers, as
+     this archive does, makes it every row. */
+  .node .n {
+    unicode-bidi: plaintext;
+    text-align: right;
+  }
+
+  /* ------------------------------------------- the folder actions menu */
+  /* Fixed, and placed by script against the pointer. Closed on scroll,
+     because a fixed box does not travel with the tree and would otherwise
+     hang over a row that is no longer the one it belongs to. */
+  .dmenu {
+    position: fixed; z-index: 90; min-width: 176px; padding: 5px;
+    border: 1px solid var(--line); border-radius: var(--radius-lg);
+    background: var(--surface-2, var(--surface)); color: var(--fg);
+    box-shadow: 0 12px 34px rgb(0 0 0 / .45);
+  }
+  .dmenu hr { margin: 5px 4px; border: 0; border-top: 1px solid var(--line-soft); }
+  .dmenu-item {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 8px 10px; border: 0; border-radius: var(--radius);
+    background: none; color: var(--fg); cursor: pointer;
+    font: inherit; font-size: var(--text-sm); text-align: start;
+  }
+  .dmenu-item:hover, .dmenu-item:focus-visible { background: var(--surface); outline: none; }
+  .dmenu-item .ic { width: 15px; height: 15px; flex: none; opacity: .85; }
+  /* Delete is the only destructive entry, and it is the only one that is
+     coloured. A menu where everything shouts says nothing. */
+  .dmenu-item.danger { color: var(--bad, #ff6b6b); }
+  .dmenu-item.danger:hover { background: rgb(255 107 107 / .12); }
+
+  /* A folder row with a file hovering over it. Solid rather than dashed:
+     this is a target being armed, not a drop zone waiting. */
+  .node.drop-on {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+
+  /* The match excerpt is document PROSE, mostly Persian, so it reads in its
+     own direction rather than the identifiers' -- the same neutral-character
+     problem the rendered preview had, one pane over. */
+  .snip {
+    unicode-bidi: plaintext;
+    text-align: right;
+  }
+
+  /* TEXT-ALIGN DOES NOTHING TO A FLEX ITEM, and that is why the reference
+     line stayed on the left after everything around it moved.
+
+     A result card's first line is not text, it is a flex row: the reference
+     and its category chip sit side by side in <div class="row">. Setting
+     text-align:right on the card moved the file name and the excerpt, which
+     are ordinary blocks, and left this line exactly where it was -- which is
+     precisely the half-fixed state that got reported. A flex container places
+     its children by justify-content; text-align only ever reaches the text
+     INSIDE each child.
+
+     flex-end rather than a direction flip: the card is pinned ltr so that
+     "507-068" and a file extension keep their order, and reversing the axis
+     here would put the chip before the reference it labels. */
+  .row-item .row { justify-content: flex-end; }
+  .sheet {
+    max-width: 860px; margin: 0 auto; padding: 52px 60px;
+    background: #fff; color: #101418; border-radius: 3px;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .5), 0 10px 34px rgb(0 0 0 / .45);
+    user-select: text; -webkit-user-select: text;
+  }
+  /* Each block decides its own direction from its first strong character, so
+     a Persian paragraph reads right-to-left inside a left-to-right page --
+     which is exactly what Word itself does. */
+  .dx-doc p, .dx-doc li, .dx-doc td, .dx-doc th,
+  .dx-doc h1, .dx-doc h2, .dx-doc h3, .dx-doc h4, .dx-doc h5, .dx-doc h6,
+  .textfallback { unicode-bidi: plaintext; }
+  .dx-doc { font: 11pt/1.55 "Calibri", "Segoe UI", sans-serif; }
+  .dx-doc p { margin: .32em 0; }
+  .dx-doc h1, .dx-doc h2, .dx-doc h3,
+  .dx-doc h4, .dx-doc h5, .dx-doc h6 { margin: .7em 0 .3em; line-height: 1.3; }
+  .dx-doc h1 { font-size: 1.5em; } .dx-doc h2 { font-size: 1.3em; } .dx-doc h3 { font-size: 1.15em; }
+  .dx-table { border-collapse: collapse; margin: 10px 0; max-width: 100%; }
+  .dx-table td { border: 1px solid #b7bcc4; padding: 4px 8px; vertical-align: top; }
+  .dx-img { max-width: 100%; height: auto; }
+  .dx-tab { display: inline-block; width: 2.4em; }
+  .dx-pagebreak { border-top: 1px dashed #c3c8d0; margin: 26px -20px; }
+  .dx-list { margin: .3em 0; padding-inline-start: 1.7em; }
+  .dx-note { color: var(--fg-faint); font-style: italic; font-size: .9em; }
+  .dx-doc a { color: #0f6cbd; }
+  .textfallback { white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.9; }
+
+  /* docx-preview injects its own page wrapper each render. #docBody already
+     supplies the surrounding background and padding, so those are turned off
+     rather than left to double up. !important because the library's <style>
+     lands after this one, and an unweighted rule of equal specificity loses. */
+  .docx-wrapper { background: transparent !important; padding: 0 !important; }
+  .docx-wrapper > section.docx {
+    border-radius: 4px !important; margin: 0 auto 24px !important;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .5), 0 10px 34px rgb(0 0 0 / .45) !important;
+  }
+
+  /* The toast is styled in app.css, shared with the Persian pages. */
+
+  /* ------------------------------------------------------ first paint */
+  /* svh is the SMALLEST viewport -- the one with the toolbars showing. A
+     first-paint container asked for 100vh gets the largest instead, so it is
+     taller than the screen and the page starts life scrollable and bouncing
+     before anything has loaded. svh fills what is actually visible and never
+     overflows, and unlike dvh it does not resize as the toolbar hides. */
+  #boot { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; min-height: 100svh; }
+  .boot-bar {
+    display: flex; align-items: center; gap: var(--s3);
+    padding: 0 var(--s4); height: 54px;
+    background: var(--surface); border-bottom: 1px solid var(--line-soft);
+  }
+  .boot-body { display: grid; place-items: center; padding: var(--s4); }
+  .boot-body .ld { --ld-size: min(140px, 34vw); }
+  /* A rounded bar for toolbar-shaped placeholders; .skel i is for text rows. */
+  .skel-pill {
+    display: block; height: 15px; border-radius: var(--radius-full);
+    background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
+    background-size: 200% 100%; animation: sheen 1.25s linear infinite;
+  }
+
+  /* Keyboard hint inside the empty search box. */
+  .kbd-hint {
+    position: absolute; inset-inline-end: 11px; top: 50%; transform: translateY(-50%);
+    padding: 2px 6px; border: 1px solid currentColor; border-radius: 4px;
+    font: 11px/1 var(--font-mono); color: var(--fg-faint);
+    opacity: .6; pointer-events: none; transition: opacity var(--fast) var(--ease);
+  }
+
+  /* ----------------------------------------------------------- phone
+     The desktop layout is three columns, which together are far wider than a
+     phone. Below 820px they become one screen at a time: results by default,
+     the folder tree as a slide-over, and the document full screen with a way
+     back. */
+  #scrim { display: none; position: fixed; inset: 0; z-index: 39; background: rgb(0 0 0 / .5); }
+  .mobile-only { display: none; }
+
+  @media (max-width: 820px) {
+    /* Three rows, in the order the hand reaches them.
+       The bar was one wrapping line: the search field shared a row with the
+       brand and the buttons, so it was never more than about half the width
+       on the screen where searching is the whole point and typing is slowest.
+       Now the mark and the name identify the app on top, the field has the
+       width to itself underneath, and the two controls sit below it -- within
+       reach of a thumb rather than up beside the notch. */
+    .appbar {
+      row-gap: var(--s2);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+    }
+    /* Rows assigned explicitly rather than left to `order` and wrapping.
+       Left to itself this came out five rows and 282px tall -- a third of the
+       screen -- because the account picture, the "Results" button and the
+       document count each claimed a line of their own. Named rows put the
+       picture up beside the brand where it belongs and the count next to
+       Refresh, which is the row it describes. */
+    .appbar .brand  { grid-column: 1; grid-row: 1; }
+    /* The menu button belongs in the top-right corner -- the leading corner on
+       this right-to-left page, and the side its drawer opens from. It was in
+       column 2, row 3: the LEFT column (column 1 is the start edge, which is
+       the right in RTL) and two rows down, so it sat at the bottom-left of the
+       header while the drawer slid in from the right. Column 1 / row 1 with
+       justify-self:start puts it hard against the top-right. */
+    .appbar .navtoggle  { grid-column: 1; grid-row: 1; justify-self: start; }
+    /* The account picture takes the opposite top corner. */
+    .appbar .um     { grid-column: 2; grid-row: 1; justify-self: end; }
+    .appbar .search { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: none; }
+    .appbar #refreshBtn { grid-column: 1; grid-row: 3; justify-self: start; }
+    /* "Results" is the way back from a document, so it is only a control
+       while a document is open. Shown on the row it shares with nothing else
+       so it cannot squeeze Refresh. */
+    .appbar #navBack { display: none; }
+    body.show-view .appbar #navBack {
+      display: inline-flex; grid-column: 1; grid-row: 4; justify-self: start;
+    }
+    /* The count sits under Refresh rather than on a row of its own: it is one
+       short line of grey text and does not deserve 40px of header. */
+    .appbar #count { grid-column: 1 / -1; grid-row: 5; font-size: var(--text-xs); }
+    /* The spacer is a flex device and does nothing in a grid except occupy a
+       cell, which is exactly what must not happen here. */
+    .appbar .spacer { display: none; }
+
+    #side {
+      position: fixed; inset-block: 0; inset-inline-start: 0; z-index: var(--z-drawer);
+      width: 82%; max-width: 320px;
+      /* Below the bar, not over it. See the note by #side.drill. */
+      inset-block-start: var(--appbar-h, 56px);
+      transform: translateX(102%);          /* off-screen to the right, in RTL */
+      transition: transform var(--normal) ease-out;
+      box-shadow: var(--shadow-lg);
+    }
+    body.nav-open #side { transform: none; }
+    body.nav-open #scrim { display: block; }
+
+    /* A screen, not a panel over one.
+       At 82% of the width with a 320px ceiling, the results pane stayed
+       visible down the side of the folder list -- photographed on an iPhone,
+       fragments of document titles were legible beside the folders, which is
+       what made the panel read as something laid over the page rather than
+       as where you now are. Drilling through folders is navigation, and
+       navigation that leaves the previous screen half on show invites the
+       reader to tap it.
+       Keyed on .drill, the class treePhone() sets from the same matchMedia
+       that decides all of this, so the geometry cannot disagree with the
+       behaviour. A tablet wide enough to keep the tree keeps the drawer. */
+    #side.drill { width: 100%; max-width: none; }
+    /* The drill panel is a screen of its own, but not the whole screen: the
+       logo and the search field stay put above it. Choosing a folder and
+       searching are the two ways into this archive, and covering one of them
+       while the reader uses the other is what made the panel feel like a
+       modal they had to escape. The bar is measured, not assumed -- it is
+       three rows on a phone. */
+    #side.drill { inset-block-start: var(--appbar-h, 56px); }
+    /* The scrim likewise stops at the bar, so the header is never dimmed. */
+    body.nav-open #scrim { inset-block-start: var(--appbar-h, 56px); }
+    /* The scrim stays as it is: behind a panel that now covers the width it
+       is not visible, and a sibling selector to switch it off would depend on
+       a DOM order this file does not otherwise rely on. */
+
+    /* And the glass dock stays put below it, as the bar does above.
+       The panel is the phone's first screen here, down to the foot of the
+       window at the drawer's z-index, which is over the dock's: measured on
+       the live 5.25.0 at 390px, the middle of the dock answered to a folder
+       row, and the only way off this page was the panel's own close button.
+       So the dock is lifted over the panel while it is open, and the folder
+       list ends above the dock, so its last rows can be scrolled clear. */
+    body.has-glassnav.nav-open .glass-dock { z-index: calc(var(--z-drawer) + 1); }
+    body.has-glassnav #side.drill {
+      padding-bottom: calc(var(--glass-dock-h) + 26px + env(safe-area-inset-bottom, 0px));
+    }
+
+    #list { width: 100% !important; min-width: 0 !important; border-inline-end: 0; }
+    #view { display: none !important; }
+    body.show-view #list { display: none; }
+    body.show-view #view { display: flex !important; }
+
+    .mobile-only { display: inline-flex; }
+    .node { min-height: 40px; }
+    .row-item { padding: 12px; }
+    /* The handoff card below is one centred column, so #docBody centres it. */
+    #docBody { padding: var(--s3); display: grid; place-items: center; }
+    .sheet { padding: 24px 20px; }
+
+    /* What stands in for the preview on a phone. See renderHandoff(). */
+    .doc-hand { max-width: 34rem; padding: var(--s5) var(--s4); text-align: center; }
+    .doc-hand .ic { width: 34px; height: 34px; color: var(--line); }
+    .doc-hand b {
+      display: block; margin-top: var(--s2);
+      font-size: var(--text-md); font-weight: 650; overflow-wrap: anywhere;
+    }
+    .doc-hand .hand-meta {
+      margin-top: 4px; font-size: var(--text-xs); color: var(--fg-faint);
+      overflow-wrap: anywhere;
+    }
+    .doc-hand .hand-note {
+      margin: var(--s4) 0 var(--s5);
+      font-size: var(--text-sm); line-height: 1.7; color: var(--fg-muted);
+    }
+    .doc-hand .hand-acts { display: grid; gap: var(--s2); }
+
+    /* Only Download shares the bar now, so the file name gets to wrap instead
+       of ellipsizing to 29px of a 173px string, which is what it did at 360px
+       when the segmented control and two buttons were beside it. */
+    .doc-bar .doc-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  }
+
+  /* ------------------------------------------ folders, one level at a time
+     The desktop tree opens in place, and for a 244px column standing beside
+     the results that is the right shape: three levels are on screen at once,
+     and the indent, the trunk and the elbow say which reference a category
+     belongs to.
+
+     In a drawer on a phone none of that survives. Measured on this build in
+     WebKit at 390px, an open third level put every row at 303px inside a
+     320px drawer with the deepest labels starting 52px in -- and worse,
+     tapping a folder dismissed the drawer, so the level just opened was
+     behind a closed panel and only reachable by opening it again. Expanding
+     in place needs somewhere to expand into.
+
+     So a phone gets one level at a time: tapping a folder replaces the list
+     with what is inside it, the folder you are in is named at the top, and
+     one control goes back to the level above. Same payload, same rows, same
+     data attributes and therefore the same selection path -- only the way
+     between levels differs.
+
+     Keyed off the .drill class rather than a second copy of the breakpoint.
+     treePhone() sets it from the same phoneView matchMedia that decides
+     whether the document is previewed, so the styling and the behaviour
+     cannot drift apart the way two hand-kept media queries would. On a
+     desktop the class is never set and every rule below matches nothing. */
+  #side.drill { padding: 0; }
+
+  /* Sticky, because the way back must not be twenty rows above the thumb on
+     a group that holds twenty references. */
+  #side.drill .drill-bar {
+    position: sticky; top: 0; z-index: 1;
+    display: flex; align-items: center; gap: var(--s1);
+    padding: var(--s1) var(--s1) var(--s1) 0;
+    background: var(--surface); border-bottom: 1px solid var(--line-soft);
+  }
+  /* The parent's name, not a bare arrow. Two levels down "back" on its own
+     does not say back to what, and both number levels of a reference look
+     alike -- 406 above 300 -- so the label is the only thing that says which
+     one tapping this returns to. */
+  #side.drill .drill-up {
+    flex: 1; min-width: 0; min-height: 44px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 var(--s3); border: 0; border-radius: var(--radius-sm);
+    background: none; color: var(--accent); text-align: start;
+    font: 600 var(--text-base)/1.2 var(--font-latin); cursor: pointer;
+  }
+  #side.drill .drill-up:hover { background: var(--surface-2); }
+  #side.drill .drill-up .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* At the top level there is nowhere up to go, so the same slot names the
+     panel instead of offering a control that would do nothing. */
+  #side.drill .drill-here {
+    flex: 1; min-width: 0; padding: 0 var(--s3);
+    font: 650 var(--text-base)/44px var(--font-latin); color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Dismissing the panel is how you get to the documents you have just
+     filtered to, so it is a control of its own and not only the scrim. */
+  #side.drill .drill-close {
+    flex: none; width: 44px; height: 44px;
+    display: grid; place-items: center;
+    border: 0; border-radius: var(--radius-sm);
+    background: none; color: var(--fg-muted); cursor: pointer;
+  }
+  #side.drill .drill-close:hover { background: var(--surface-2); color: var(--fg); }
+
+  /* Where you are. The bar above names one level up; this names the path to
+     here, which is what keeps "406 > 300" apart from "300 > 406". */
+  #side.drill .drill-now {
+    display: flex; align-items: baseline; gap: var(--s2);
+    padding: 10px var(--s3) 7px;
+    font: 650 var(--text-md)/1.3 var(--font-latin); color: var(--fg);
+  }
+  #side.drill .drill-now .p {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #side.drill .drill-now .sub {
+    flex: none; font: 500 var(--text-xs)/1.4 var(--font-latin); color: var(--fg-faint);
+  }
+
+  /* 44px, which is Apple's guidance. Measured in WebKit, these rows came to
+     39px on a desktop and 40px on a phone, the phone block above having
+     already nudged them once; four more gets them over the line. A phone has
+     no hover to aim with and no cursor to aim by, so a row that is
+     comfortable with a mouse is a coin toss with a thumb.
+
+     The indent, the trunk and the elbow go with the nesting, so every label
+     starts at the same 12px whatever level it is on. */
+  #side.drill .node {
+    min-height: 44px; padding: 8px var(--s3); margin-bottom: 0;
+    border-radius: 0; border-bottom: 1px solid var(--line-soft);
+  }
+  #side.drill .node:last-child { border-bottom: 0; }
+  /* The twisty said "this expands downwards", which is no longer what a tap
+     does. An arrow at the trailing edge says "this goes onwards" instead. */
+  #side.drill .node .tw { display: none; }
+  #side.drill .node .into { flex: none; width: 15px; height: 15px; color: var(--fg-faint); }
+  #side.drill .node.on .into { color: var(--accent-lift); }
+  #side.drill .nav-sect { padding: 12px var(--s3) 6px; }
+</style>
+</head>
+
+<body>
+<a class="skip" href="#list">Skip to results</a>
+
+<!-- ===== first paint =====
+     Both #setup and #app start hidden and only one of them is revealed once
+     /api/status answers, so until then the page was simply blank -- on a cold
+     start, for as long as the index takes to report itself. A skeleton says "a
+     document browser is loading and it looks roughly like this", where a blank
+     page says the application is broken.
+
+     Removed by hideBoot() on whichever of the two paths wins. -->
+<div id="boot" aria-hidden="true">
+  <div class="boot-bar"><span class="skel-pill" style="width:150px"></span><span class="skel-pill" style="width:min(320px,40vw)"></span></div>
+  <!-- The loading animation, painted by the server into this marker so it is
+       on screen before nav.js or any other script has arrived -- which is the
+       point, since the wait it is covering includes that arrival. -->
+  <div class="boot-body"><!--LOADER--></div>
+</div>
+
+<!-- ===== setup ===== -->
+<div id="setup" class="hidden">
+  <div class="card rise" style="width:100%;max-width:520px">
+    <div class="card-body">
+      <div class="row" style="gap:11px;margin-bottom:var(--s4)">
+        <img src="/icon.png" alt="" width="38" height="38">
+        <h1>Connect to the archive</h1>
+      </div>
+      <p class="hint" id="setupLead" style="margin:0 0 var(--s5);font-size:var(--text-base)">
+        Tell the app where the documents are.
+      </p>
+
+      <div class="notice notice-bad hidden" id="setupErr" role="alert" style="margin-bottom:var(--s4);white-space:pre-wrap"></div>
+
+      <div class="field">
+        <label class="label" for="path">Documents folder</label>
+        <div class="row" style="gap:var(--s2)">
+          <input type="text" id="path" class="input grow" placeholder="C:\Archive"
+                 spellcheck="false" autocomplete="off" dir="ltr">
+        </div>
+      </div>
+
+      <div class="notice" style="margin-bottom:var(--s4);font-size:var(--text-sm)" role="note">
+        The folder is read on the server, not on this computer: give its path as
+        the server sees it, such as /srv/archive or C:\Archive.
+      </div>
+
+      <button id="connectBtn" type="button" class="btn btn-primary" style="width:100%">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== app ===== -->
+<div id="app" class="hidden">
+  <nav class="appbar">
+    <!-- Phone-only navigation. The folder tree and the document viewer are
+         separate screens on a narrow display, so there has to be a way to
+         reach one and get back from the other. -->
+    <!-- One phone-only control, not two.
+         The folder list is the first screen on a phone, so a "Folders" button
+         would point at where you already are; and the way back up a level is
+         in the folder panel's own bar, where it belongs. What is left is the
+         way back from a document to the list of them. -->
+    <button id="navBack" type="button" class="btn btn-sm mobile-only">
+      <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+      Results
+    </button>
+
+    <!-- Mark and visible title removed from the header, as on every other
+         page. The heading stays, said rather than shown -- see .sr-only. -->
+    <h1 class="sr-only">Document Archive</h1>
+
+    <div class="search grow" style="max-width:620px">
+      <svg class="ic-search" aria-hidden="true"><use href="#i-search"/></svg>
+      <label class="hidden" for="q">Search</label>
+      <span class="ring"><input type="text" id="q" class="input" spellcheck="false" autocomplete="off"
+             placeholder="Reference number, or any words inside the documents…"></span>
+      <button id="clearQ" class="clear" type="button" aria-label="Clear search"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      <span id="qHint" class="kbd-hint">/</span>
+    </div>
+
+    <!-- Reading the box as a Persian question, rather than as words to match.
+         A toggle and not a guess: a search that happens to contain the word
+         فاکتور is not necessarily asking for invoices, and quietly narrowing
+         somebody's results to a category they did not pick gives them fewer
+         documents with no sign of why. With this on, what was understood is
+         printed above the results. -->
+    <button id="askToggle" type="button" class="btn btn-sm" aria-pressed="false"
+            title="Read the box as a Persian question, such as «پیش‌فاکتورهای تیر ۱۴۰۴»">
+      <svg class="ic" aria-hidden="true"><use href="#i-sparkles"/></svg>
+      پرسش
+    </button>
+
+    <button id="refreshBtn" type="button" class="btn btn-sm">
+      <svg class="ic" aria-hidden="true"><use href="#i-refresh-cw"/></svg>
+      Refresh
+    </button>
+
+    <span class="spacer"></span>
+    <span id="count" class="hint" style="margin:0;white-space:nowrap"></span>
+
+    <a href="/settings" id="navSettings" class="navlink hidden collapses">Settings</a>
+    <span id="navUser" class="hint hidden collapses" style="margin:0;white-space:nowrap"></span>
+    <button id="navSignOut" type="button" class="btn btn-ghost btn-sm hidden collapses">Sign out</button>
+  </nav>
+
+  <div id="scrim"></div>
+  <div class="panes" role="main">
+    <aside id="side" aria-label="پوشه‌ها"></aside>
+    <!-- The interpretation panel is not a child element here. #list has its
+         innerHTML replaced on every search and on every skeleton, so anything
+         parked inside it is destroyed on the next keystroke; it is rendered as
+         part of the list's own content instead, by interpHTML(). -->
+    <div id="list" tabindex="-1" aria-label="Results"></div>
+    <div id="view" aria-label="Document"></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------ asking for a name, or a yes -->
+<!-- A <dialog>, not window.prompt and window.confirm.
+     Those two were what this used first and they are wrong here for three
+     separate reasons: they cannot be styled, so a Persian right-to-left
+     application asks its questions in the browser chrome's language and
+     direction; they block the whole page, including the tree underneath that
+     the question is about; and some browsers let a reader suppress them
+     permanently, after which the folder controls would silently do nothing. -->
+<dialog class="sheet" id="askSheet" aria-labelledby="askTitle">
+  <form id="askForm" method="dialog">
+    <div class="sheet-head">
+      <h3 id="askTitle"></h3>
+      <span class="spacer" style="margin-inline-start:auto"></span>
+      <button class="gbtn" type="button" data-ask-close aria-label="بستن">
+        <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="sheet-body">
+      <p class="fld-note" id="askBody" hidden></p>
+      <label class="fld" id="askField">
+        <span id="askLabel">نام</span>
+        <input class="input" id="askInput" autocomplete="off" maxlength="120">
+      </label>
+    </div>
+    <div class="sheet-foot">
+      <button class="gbtn" type="button" data-ask-close>انصراف</button>
+      <span class="spacer" style="margin-inline-start:auto"></span>
+      <button class="btn btn-primary" type="submit" id="askOk">تأیید</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ------------------------------------------------ adding files to a folder -->
+<!-- The drop zone and the flying send button, from upload.js. -->
+<dialog class="sheet" id="upSheet" aria-labelledby="upSheetTitle">
+  <div class="sheet-head">
+    <h3 id="upSheetTitle">افزودن پرونده به «<span id="upWhere"></span>»</h3>
+    <span class="spacer" style="margin-inline-start:auto"></span>
+    <button class="gbtn" type="button" data-up-close aria-label="بستن">
+      <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div id="upDrop"></div>
+    <p class="fld-note" id="upNote" hidden></p>
+  </div>
+  <div class="sheet-foot">
+    <button class="gbtn" type="button" data-up-close>انصراف</button>
+    <span class="spacer" style="margin-inline-start:auto"></span>
+    <button class="btn btn-primary fly-btn" type="button" id="upSend">
+      <svg class="ic fly-plane" aria-hidden="true"><use href="#i-send"/></svg>
+      <svg class="ic fly-check" aria-hidden="true"><use href="#i-check"/></svg>
+      <span class="fly-label">فرستادن</span>
+    </button>
+  </div>
+</dialog>
+
+<script src="/nav.js"></script>
+<!-- The shared upload control, before this page's own script uses it. -->
+<script src="/upload.js"></script>
+<script>
+'use strict';
+
+const T = new URLSearchParams(location.search).get('t') || '';
+
+function api(path, params = {}) {
+  const u = new URL(path, location.origin);
+  if (T) u.searchParams.set('t', T);
+  for (const [k, v] of Object.entries(params)) if (v !== '' && v != null) u.searchParams.set(k, v);
+  return u.toString();
+}
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Latin digits throughout this screen, deliberately.
+//
+// Persian numerals suit figures somebody reads as quantities. Here almost
+// every number is an identifier or something
+// typed into a search box: reference numbers, folder names, file sizes. A
+// person comparing "125-156" on screen against the same string in Explorer
+// or in an email needs to see the same characters, and
+// Persian digits break that match.
+const num = n => (Number.isFinite(+n) ? String(+n) : String(n ?? ''));
+
+const kb = n => n < 1024 ? `${n} B`
+              : n < 1048576 ? `${Math.round(n / 1024)} KB`
+              : `${(n / 1048576).toFixed(1)} MB`;
+
+// A 401 means the session went away -- it expired, or it was revoked from
+// another device. Send them to sign in and bring them back here afterwards,
+// which is what the other four pages already do.
+//
+// Without this, 401 fell through to the generic branch: mid-session it raised
+// a red toast reading the literal "401 Unauthorized", and on a first load
+// while signed out it printed that string onto the setup screen for the moment
+// before the accounts bootstrap redirected.
+function signInAgain() {
+  location.replace('/login?next=' + encodeURIComponent(location.pathname));
+  return { kind: 'auth' };
+}
+
+async function jget(url) {
+  let r;
+  try { r = await fetch(url); } catch { throw { kind: 'network' }; }
+  if (r.status === 401) throw signInAgain();
+  if (r.status === 403) throw { kind: 'token' };
+  if (!r.ok) throw { kind: 'http', message: r.status + ' ' + r.statusText };
+  return r.json();
+}
+
+async function jpost(url, body) {
+  let r;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw { kind: 'network' }; }
+  if (r.status === 401) throw signInAgain();
+  if (r.status === 403) throw { kind: 'token' };
+  if (!r.ok) throw { kind: 'http', message: r.status + ' ' + r.statusText };
+  return r.json();
+}
+
+function problem(e) {
+  if (e && e.kind === 'auth') return 'Your session ended. Taking you to the sign-in page…';
+  if (e && e.kind === 'token') return 'Missing access token. Reopen the app from its shortcut.';
+  if (e && e.kind === 'network') {
+    // A failed fetch has two very different causes that call for opposite
+    // actions, and navigator.onLine separates them. The old copy told
+    // everybody to restart the app, which does nothing at all for a pulled
+    // cable or a dropped wireless connection -- the more common of the two
+    // now that this is reached over the network rather than from the desktop.
+    return navigator.onLine
+      ? 'The server stopped responding. Check that the archive service is running.'
+      : 'This device is offline. Reconnect to the network and try again.';
+  }
+  return (e && e.message) || String(e);
+}
+
+// The toast lives in nav.js, shared by every page. Kept as window.toast
+// with the same (message, isError) call shape this file has always used.
+
+// ---------- setup ----------
+
+// Take the loading skeleton down. Called from every path that reveals real
+// content, so whichever of setup or app wins, the placeholder goes with it.
+function hideBoot() {
+  $('boot')?.remove();
+}
+
+function showSetup(reason) {
+  hideBoot();
+  $('setup').classList.remove('hidden');
+  $('setup').classList.add('flex');
+  $('app').classList.add('hidden');
+  $('app').classList.remove('flex');
+  if (reason) $('setupLead').textContent = reason;
+  $('path').focus();
+}
+
+function setupError(msg) {
+  const box = $('setupErr');
+  box.classList.toggle('hidden', !msg);
+  box.textContent = msg || '';
+}
+
+$('path').addEventListener('keydown', e => { if (e.key === 'Enter') $('connectBtn').click(); });
+
+$('connectBtn').onclick = async e => {
+  const btn = e.currentTarget;
+  const path = $('path').value.trim();
+  if (!path) { setupError('Enter the folder holding the documents.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<svg class="ic spin" viewBox="0 0 24 24" fill="none">' +
+    '<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity=".25"/>' +
+    '<path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>Connecting…';
+  setupError('');
+  try {
+    const r = await jpost(api('/api/connect'), { path });
+    if (!r.ok) {
+      setupError(r.error);
+    } else {
+      hideBoot();
+      $('setup').classList.add('hidden');
+      $('setup').classList.remove('flex');
+      $('app').classList.remove('hidden');
+      $('app').classList.add('flex');
+      await loadDocsPerm();
+      await tree();
+      await search();
+      $('q').focus();
+      toast(`Connected: ${r.count} document${r.count === 1 ? '' : 's'}.`);
+    }
+  } catch (err) {
+    setupError(problem(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
+  }
+};
+
+// ---------- browse tree ----------
+
+let rows = [], sel = null, timer = null;
+let filter = { group: '', ref: '', category: '' };
+const openGroups = new Set();
+const openRefs = new Set();
+
+// Which level the phone's folder panel is showing: [] is the top, ['406'] is
+// inside that group, ['406', '406/300'] is inside that reference. The second
+// entry is the same "group/name" key openRefs uses, so the two ways of
+// describing a reference stay one shape.
+//
+// The desktop has no equivalent because it has no single current level: it
+// opens levels in place and shows several at once.
+let drill = [];
+
+// One row of the folder tree. The twisty is a span even when empty so every
+// row's label starts at the same offset, whether or not it can expand.
+function node(opts) {
+  const cls = ['node', opts.on ? 'on' : '', opts.level || '', opts.last ? 'last' : '']
+    .filter(Boolean).join(' ');
+  const twisty = opts.expandable
+    ? `<span class="tw${opts.open ? ' open' : ''}" aria-hidden="true">&#9664;</span>`
+    : '<span class="tw" aria-hidden="true"></span>';
+  // "(2)" beside a folder is how many folders are inside it, which is what
+  // opening it will show. A leaf category carries no count: the number of
+  // documents is the result list, right there on the next pane.
+  const count = opts.count == null ? '' : `<span class="c">(${num(opts.count)})</span>`;
+  // Only the phone's one-level panel passes this. A tap there moves to the
+  // next level rather than expanding in place, so the row needs an arrow
+  // saying so and a marker the click handlers can read back. Unset on the
+  // desktop, where both halves are empty strings and the markup is exactly
+  // what it was before.
+  const into = opts.into ? ' data-into="1"' : '';
+  const arrow = opts.into
+    ? '<svg class="ic into" aria-hidden="true"><use href="#i-arrow-left"/></svg>' : '';
+  return `<div class="${cls}" role="treeitem" tabindex="-1"` +
+         (opts.expandable ? ` aria-expanded="${opts.open ? 'true' : 'false'}"` : '') +
+         (opts.on ? ' aria-selected="true"' : '') +
+         `${into}${opts.data || ''}>${twisty}<span class="n">${esc(opts.name)}</span>${count}${arrow}</div>`;
+}
+
+// The filter a tree row stands for, read back off the row itself.
+//
+// Both presentations put the same data attributes on a row, so the scope a
+// tap selects is the same work either way and is written down once. The
+// expand and drill bookkeeping differs and stays with each caller.
+function filterOf(el) {
+  if (el.dataset.all) return { group: '', ref: '', category: '' };
+  if (el.dataset.c) return { group: el.dataset.g, ref: el.dataset.r, category: el.dataset.c };
+  if (el.dataset.r) return { group: el.dataset.g, ref: el.dataset.r, category: '' };
+  return { group: el.dataset.g, ref: '', category: '' };
+}
+
+// Keyboard navigation, so the primary way of browsing the archive is not
+// mouse-only. One tab stop for the whole tree, arrows to move within it --
+// the standard treeview pattern, which is what a screen reader announces now
+// that the roles are in place.
+//
+// Shared by both presentations: the rows carry the same roles whichever one
+// built them, so the keyboard has no reason to behave differently, and a
+// phone reached by a Bluetooth keyboard or by VoiceOver gets the same thing.
+function wireTreeKeys() {
+  const items = [...$('side').querySelectorAll('.node')];
+  const active = items.find(el => el.classList.contains('on')) || items[0];
+  if (active) active.tabIndex = 0;
+  $('side').addEventListener('keydown', e => {
+    const i = items.indexOf(document.activeElement);
+    if (i < 0) return;
+    let next = -1;
+    if (e.key === 'ArrowDown') next = Math.min(i + 1, items.length - 1);
+    else if (e.key === 'ArrowUp') next = Math.max(i - 1, 0);
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = items.length - 1;
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); items[i].click(); return; }
+    else return;
+    e.preventDefault();
+    items[i].tabIndex = -1;
+    items[next].tabIndex = 0;
+    items[next].focus();
+  });
+}
+
+// ---------------------------------------------------------- folder actions
+//
+// A right-click menu on the folder tree, drag-and-drop onto a folder, and an
+// upload sheet -- the three ways of adding to the archive.
+//
+// WHAT THE SERVER ALLOWS IS WHAT THE MENU OFFERS. /api/docs/list returns
+// can_write and can_admin for the signed-in account, and the menu is built
+// from those rather than from anything guessed here. Adding a folder or a
+// document is open to anyone signed in; renaming and deleting are held to two
+// named people, because the archive has no recycle bin and holds documents
+// this business is obliged to keep. A control that is going to answer 403 is
+// worse than no control.
+let docsPerm = { write: false, admin: false };
+
+// Persian digits for the folder controls' own sentences.
+//
+// num() on this page is deliberately Latin: it writes reference numbers and
+// file sizes, which are identifiers people read off against Explorer. These
+// messages are prose in Persian, and "1 پرونده فرستاده نشد" with a Latin one
+// in the middle of it reads as a figure from somewhere else -- the same
+// reason every count on the home page is converted.
+const FA_D = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+const faNum = n => String(n == null ? '' : n).replace(/\d/g, d => FA_D[+d]);
+
+// Asked once per page load. The permissions do not change while somebody is
+// looking at the screen, and the tree redraws often.
+async function loadDocsPerm() {
+  try {
+    const d = await jget(api('/api/docs/list', { path: '' }));
+    docsPerm = { write: !!d.can_write, admin: !!d.can_admin };
+  } catch (_) {
+    // Unreachable, or the archive is not configured. Offer nothing rather
+    // than offer something that cannot work.
+    docsPerm = { write: false, admin: false };
+  }
+}
+
+// ---- the menu
+
+let docsMenu = null;
+
+function closeDocsMenu() {
+  if (docsMenu) { docsMenu.remove(); docsMenu = null; }
+}
+document.addEventListener('click', e => {
+  if (docsMenu && !docsMenu.contains(e.target)) closeDocsMenu();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDocsMenu(); });
+window.addEventListener('resize', closeDocsMenu);
+// Scrolling the tree would leave a fixed menu floating over the wrong row.
+window.addEventListener('scroll', closeDocsMenu, true);
+
+// openDocsMenu shows the actions for one folder.
+//
+// path is where the folder IS; name is what it is called. The root passes an
+// empty path, which is legitimate -- a new top-level case group goes there --
+// and is why rename and delete are withheld for it.
+function openDocsMenu(x, y, path, name) {
+  closeDocsMenu();
+  if (!docsPerm.write) return;
+
+  const box = document.createElement('div');
+  box.className = 'dmenu';
+  box.setAttribute('role', 'menu');
+
+  const item = (icon, label, fn, danger) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dmenu-item' + (danger ? ' danger' : '');
+    b.setAttribute('role', 'menuitem');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ic');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + icon);
+    svg.appendChild(use);
+    b.appendChild(svg);
+    const t = document.createElement('span');
+    t.textContent = label;
+    b.appendChild(t);
+    b.addEventListener('click', ev => { ev.preventDefault(); closeDocsMenu(); fn(); });
+    box.appendChild(b);
+    return b;
+  };
+
+  item('square-plus', 'پوشهٔ جدید', () => newFolderIn(path, name));
+  item('upload', 'افزودن پرونده', () => openUploadSheet(path, name));
+
+  // The two that change what is already there. Withheld from the root, which
+  // is the archive itself and is neither renameable nor deletable.
+  if (docsPerm.admin && path) {
+    box.appendChild(document.createElement('hr'));
+    item('file-pen', 'تغییر نام', () => renameFolder(path, name));
+    item('trash-2', 'حذف', () => deleteFolder(path, name), true);
+  }
+
+  document.body.appendChild(box);
+  // Kept on screen: a menu opened near the left edge of a right-to-left page,
+  // or near the bottom, would otherwise open off it.
+  const r = box.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, innerWidth - r.width - 8));
+  const top = Math.max(8, Math.min(y, innerHeight - r.height - 8));
+  box.style.left = left + 'px';
+  box.style.top = top + 'px';
+  docsMenu = box;
+  const first = box.querySelector('.dmenu-item');
+  if (first) first.focus();
+}
+
+// ---- asking
+
+// ask() opens the shared dialog and resolves with what was typed, or null if
+// the reader backed out.
+//
+// opt.value    prefilled, and selected so typing replaces it
+// opt.body     a sentence above the field
+// opt.ok       the confirming button's label
+// opt.noInput  a yes/no question: resolves true or null
+//
+// One dialog reused rather than one per question: three sheets that each
+// drifted would be three things to keep in step.
+let askResolve = null;
+function ask(title, opt) {
+  const o = opt || {};
+  const sheet = $('askSheet');
+  if (!sheet) return Promise.resolve(null);
+  $('askTitle').textContent = title;
+  const body = $('askBody');
+  body.hidden = !o.body;
+  body.textContent = o.body || '';
+  body.classList.toggle('bad', !!o.danger);
+  $('askField').hidden = !!o.noInput;
+  $('askInput').value = o.value || '';
+  $('askOk').textContent = o.ok || 'تأیید';
+  $('askOk').classList.toggle('btn-danger', !!o.danger);
+
+  if (typeof sheet.showModal === 'function') sheet.showModal();
+  else sheet.setAttribute('open', '');
+  setTimeout(() => {
+    if (o.noInput) { $('askOk').focus(); return; }
+    const i = $('askInput');
+    i.focus();
+    i.select(); // so typing replaces the current name rather than appending
+  }, 0);
+
+  return new Promise(res => { askResolve = res; });
+}
+
+(function bindAsk() {
+  const sheet = $('askSheet'), form = $('askForm');
+  if (!sheet || !form) return;
+  const finish = v => {
+    const r = askResolve; askResolve = null;
+    sheet.close();
+    if (r) r(v);
+  };
+  form.addEventListener('submit', ev => {
+    ev.preventDefault(); // method="dialog" would close it without answering
+    if ($('askField').hidden) { finish(true); return; }
+    const v = $('askInput').value.trim();
+    if (!v) { $('askInput').focus(); return; }
+    finish(v);
+  });
+  sheet.querySelectorAll('[data-ask-close]').forEach(b =>
+    b.addEventListener('click', () => finish(null)));
+  // Escape closes a <dialog> on its own, and a promise nobody settles would
+  // leave the caller waiting for ever.
+  sheet.addEventListener('close', () => { const r = askResolve; askResolve = null; if (r) r(null); });
+})();
+
+// ---- the actions
+
+// refreshDocs reloads everything on this page that a change to the archive
+// can affect: the folder tree, the document counts and whatever search is
+// currently showing.
+//
+// NOT location.reload(). A full page reload is the obvious reading of "hard
+// refresh", and it would be worse here in two ways: it collapses every folder
+// the reader had opened to get where they are, and after an upload it closes
+// the sheet -- taking with it the list of files that were REFUSED and the
+// reasons beside them, which is the one thing they still need to see.
+//
+// So everything the server could have changed is re-fetched, and nothing the
+// reader has done is thrown away. The server no longer races this: creating
+// or deleting a folder now records it in the index on the spot instead of
+// scheduling a walk that used to finish after the page had already asked.
+async function refreshDocs() {
+  await tree();
+  // Only if a search is showing. Re-running an empty one would replace the
+  // results somebody is reading with the default list.
+  const q = $('q');
+  if (q && q.value.trim()) await search();
+}
+
+async function newFolderIn(parent, parentName) {
+  const name = await ask('پوشهٔ جدید', {
+    body: parentName ? 'در «' + parentName + '»' : 'در ریشهٔ آرشیو',
+    ok: 'بساز',
+  });
+  if (name == null || !name.trim()) return;
+  try {
+    await jpost('/api/docs/folder', { parent: parent, name: name.trim() });
+    toast('پوشه ساخته شد.');
+    await refreshDocs();
+  } catch (e) { toast(docsProblem(e), true); }
+}
+
+async function renameFolder(path, name) {
+  const next = await ask('تغییر نام', {
+    body: '«' + name + '» به:',
+    value: name,
+    ok: 'تغییر بده',
+  });
+  if (next == null || !next.trim() || next.trim() === name) return;
+  try {
+    await jpost('/api/docs/rename', { path: path, name: next.trim() });
+    toast('نام تغییر کرد.');
+    await refreshDocs();
+  } catch (e) { toast(docsProblem(e), true); }
+}
+
+async function deleteFolder(path, name) {
+  // The folder is NAMED in the question, because "are you sure?" is a
+  // question nobody reads. The server refuses a folder that is not empty
+  // whatever this says; this is about the reader knowing which one they are
+  // about to lose.
+  const yes = await ask('حذف پوشه', {
+    noInput: true, danger: true, ok: 'حذف کن',
+    body: 'پوشهٔ «' + name + '» حذف شود؟ فقط پوشهٔ خالی حذف می‌شود.',
+  });
+  if (!yes) return;
+  try {
+    await jpost('/api/docs/delete', { path: path });
+    toast('حذف شد.');
+    await refreshDocs();
+  } catch (e) { toast(docsProblem(e), true); }
+}
+
+// docsProblem prefers the server's own sentence.
+//
+// These failures are ordinary and specific -- the name is taken, the folder
+// is not empty, that type of file is not accepted -- and the server already
+// says which in Persian. problem() would replace all of that with "HTTP 409".
+function docsProblem(e) {
+  if (e && e.body && e.body.error) return e.body.error;
+  if (e && e.message) return e.message;
+  return problem(e);
+}
+
+// ---- drag and drop onto a folder row
+
+function wireDocsDrop(row) {
+  if (!docsPerm.write) return;
+  const path = row.dataset.path;
+  if (path == null) return;
+
+  // dragover must be cancelled or the browser navigates to the dropped file,
+  // which loses the page.
+  row.addEventListener('dragover', ev => {
+    if (!ev.dataTransfer || !Array.from(ev.dataTransfer.types || []).includes('Files')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+    row.classList.add('drop-on');
+  });
+  row.addEventListener('dragleave', () => row.classList.remove('drop-on'));
+  row.addEventListener('drop', async ev => {
+    if (!ev.dataTransfer || !ev.dataTransfer.files || !ev.dataTransfer.files.length) return;
+    ev.preventDefault();
+    ev.stopPropagation(); // or the pane behind it handles the same drop
+    row.classList.remove('drop-on');
+    await uploadInto(path, ev.dataTransfer.files, row.querySelector('.n').textContent);
+  });
+}
+
+// The page itself refuses a stray drop rather than letting the browser
+// replace it with the file.
+['dragover', 'drop'].forEach(t => document.addEventListener(t, ev => {
+  if (ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files')) {
+    ev.preventDefault();
+  }
+}));
+
+// ---- uploading
+
+// Returns { saved, failed } -- or null when the request itself failed.
+//
+// The detail rather than a yes/no, because the sheet needs to know WHICH
+// files were refused: it keeps those in the list and drops the ones that
+// landed. Leaving everything there means pressing send again re-uploads the
+// files that already worked, and the server does not overwrite -- it makes
+// "report (2).pdf" -- so retrying because of one bad file quietly duplicates
+// the good ones.
+async function uploadInto(path, files, folderName) {
+  if (!files || !files.length) return null;
+  const fd = new FormData();
+  fd.append('path', path);
+  for (const f of files) fd.append('file', f);
+
+  try {
+    const r = await fetch('/api/docs/upload', {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    });
+    if (r.status === 401) { signInAgain(); return null; }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(d.error || ('فرستاده نشد (' + r.status + ')'), true); return null; }
+
+    const saved = (d.saved || []).length, failed = d.failed || [];
+    if (saved) {
+      toast(faNum(saved) + ' پرونده به «' + (folderName || 'پوشه') + '» اضافه شد.');
+    }
+    // Each refusal named. One rejected file in a drop of six must not look
+    // like the whole drop failed, and the reader needs to know WHICH.
+    for (const f of failed.slice(0, 4)) {
+      toast(f.name + ': ' + f.error, true);
+    }
+    if (failed.length > 4) toast('و ' + faNum(failed.length - 4) + ' مورد دیگر.', true);
+    if (saved) await refreshDocs();
+    return { saved: d.saved || [], failed: failed };
+  } catch (e) {
+    toast(docsProblem(e), true);
+    return null;
+  }
+}
+
+// The upload sheet: a drop zone and a send button, from upload.js.
+let uploadSheetFor = '';
+function openUploadSheet(path, name) {
+  const sheet = $('upSheet');
+  if (!sheet) return;
+  uploadSheetFor = path;
+  $('upWhere').textContent = name || 'آرشیو';
+  const host = $('upDrop');
+  host.textContent = '';
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.name = 'file';
+  input.className = 'up-input';
+  host.appendChild(input);
+  window._upDrop = (typeof window.mountDropzone === 'function')
+    ? window.mountDropzone(host, {
+        input: input, multiple: true, maxBytes: 40 * 1024 * 1024,
+        label: 'پرونده‌ها را این‌جا رها کنید',
+        hint: 'یا برای انتخاب کلیک کنید؛ حداکثر ۴۰ مگابایت برای هر پرونده',
+      })
+    : null;
+  if (typeof sheet.showModal === 'function') sheet.showModal();
+  else sheet.setAttribute('open', '');
+}
+
+// Bound once, at parse time. The sheet and its controls are in the markup and
+// are never replaced -- only their contents are -- so re-binding each time it
+// opens is how a button ends up sending four copies.
+(function bindUploadSheet() {
+  const sheet = $('upSheet');
+  if (!sheet) return;
+  const send = $('upSend'), note = $('upNote');
+  const fly = (typeof window.flyButton === 'function')
+    ? window.flyButton(send)
+    : { start() {}, ok() {}, fail() {} };
+
+  const say = (msg, bad) => {
+    if (!note) return;
+    note.hidden = !msg;
+    note.textContent = msg || '';
+    note.classList.toggle('bad', !!bad);
+  };
+
+  sheet.querySelectorAll('[data-up-close]').forEach(b =>
+    b.addEventListener('click', () => { say(''); fly.fail(); sheet.close(); }));
+
+  send.addEventListener('click', async () => {
+    const files = window._upDrop ? window._upDrop.files() : [];
+    if (!files.length) { say('پرونده‌ای انتخاب نشده است.', true); return; }
+    if (send.getAttribute('aria-busy') === 'true') return;
+
+    fly.start();
+    say('در حال فرستادن ' + faNum(files.length) + ' پرونده…');
+    const res = await uploadInto(uploadSheetFor, files, $('upWhere').textContent);
+    if (!res) { fly.fail(); say('فرستاده نشد.', true); return; }
+
+    // What landed leaves the list; what was refused stays, so a second press
+    // retries only the problem and cannot duplicate the files that worked.
+    const stuck = new Set((res.failed || []).map(f => f.name));
+    if (window._upDrop) window._upDrop.keep(f => stuck.has(f.name));
+
+    if (!stuck.size) {
+      // The tick lands before the sheet closes, so the animation is seen
+      // rather than merely fired.
+      fly.ok();
+      say('فرستاده شد.');
+      await new Promise(r => setTimeout(r, 620));
+      sheet.close();
+      say('');
+    } else {
+      fly.fail();
+      say(faNum(stuck.size) + ' پرونده فرستاده نشد؛ در فهرست مانده است.', true);
+    }
+  });
+})();
+
+// wireDocsRows gives every folder row in the tree its menu and its drop
+// target. Called after each redraw, because the rows are rebuilt from HTML
+// each time and listeners do not survive that.
+function wireDocsRows() {
+  const side = $('side');
+  if (!side) return;
+  for (const row of side.querySelectorAll('.node[data-path], .node[data-all]')) {
+    // data-all is the archive itself: no path, so a new top-level case group
+    // goes there, and rename and delete are withheld.
+    const path = row.dataset.all ? '' : (row.dataset.path || '');
+    const name = row.dataset.all ? 'آرشیو' : (row.querySelector('.n') || {}).textContent || '';
+    row.addEventListener('contextmenu', ev => {
+      if (!docsPerm.write) return; // let the browser's own menu through
+      ev.preventDefault();
+      openDocsMenu(ev.clientX, ev.clientY, path, name);
+    });
+    wireDocsDrop(row);
+  }
+}
+
+async function tree() {
+  let t;
+  try { t = await jget(api('/api/tree')); } catch (e) { toast(problem(e), true); return; }
+
+  // Same payload, two presentations. The phone's is a screen of its own
+  // rather than a column, so it drills instead of expanding; see treePhone().
+  if (phoneView.matches) { treePhone(t); return; }
+  // Left over from a window that was narrow a moment ago, or a tablet that
+  // has just been turned. Removing it here means the desktop branch never
+  // has to know the phone one exists.
+  $('side').classList.remove('drill');
+
+  const allOn = !filter.group && !filter.ref && !filter.category;
+  // "All documents" is a tree item like the folders, so it sits in a tree
+  // of its own: a treeitem with no tree around it is announced as nothing.
+  let html = '<div class="nav-sect">آرشیو</div><div role="tree" aria-label="آرشیو">' +
+    node({ name: 'همهٔ اسناد', on: allOn, data: ' data-all="1"' }) + '</div>' +
+    '<div class="nav-sect">بر اساس شمارهٔ پرونده</div><div role="tree" aria-label="پوشه‌ها">';
+
+  // Three levels, mirroring the folders on disk: 406 › 300 › Inquiry. The
+  // middle level used to be missing, which both disagreed with what people
+  // saw in Explorer and merged every reference starting 406 into one list.
+  const groups = t.groups || [];
+  groups.forEach((g, gi) => {
+    const open = openGroups.has(g.name);
+    const on = filter.group === g.name && !filter.ref && !filter.category;
+    html += node({
+      name: g.name, count: g.count, on, open, expandable: true,
+      last: gi === groups.length - 1 && !open,
+      data: ` data-g="${esc(g.name)}" data-path="${esc(g.name)}"`,
+    });
+    if (!open) return;
+
+    const refs = g.references || [];
+    refs.forEach((r, ri) => {
+      const key = g.name + '/' + r.name;
+      const ropen = openRefs.has(key);
+      const ron = filter.ref === r.ref && !filter.category;
+      html += node({
+        name: r.name, count: r.count, on: ron, open: ropen, expandable: true, level: 'tree-ref',
+        last: ri === refs.length - 1 && !ropen,
+        data: ` data-g="${esc(g.name)}" data-r="${esc(r.ref)}" data-rk="${esc(key)}" data-path="${esc(key)}"`,
+      });
+      if (!ropen) return;
+
+      const cats = r.categories || [];
+      cats.forEach((c, ci) => {
+        const con = filter.ref === r.ref && filter.category === c.name;
+        html += node({
+          name: c.name, on: con, level: 'tree-cat',
+          last: ci === cats.length - 1,
+          data: ` data-g="${esc(g.name)}" data-r="${esc(r.ref)}" data-c="${esc(c.name)}" data-path="${esc(key + '/' + c.name)}"`,
+        });
+      });
+    });
+  });
+  $('side').innerHTML = html + '</div>';
+
+  wireTreeKeys();
+  wireDocsRows();
+
+  for (const el of $('side').querySelectorAll('[data-all],[data-g]')) {
+    el.onclick = () => {
+      if (el.dataset.rk) {
+        // A reference row both selects and expands, same as a group.
+        const k = el.dataset.rk;
+        openRefs.has(k) ? openRefs.delete(k) : openRefs.add(k);
+      } else if (!el.dataset.all && !el.dataset.c) {
+        // Clicking a group both selects and expands it, so one click does what
+        // people expect rather than needing a separate disclosure target.
+        const g = el.dataset.g;
+        openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g);
+      }
+      filter = filterOf(el);
+      tree(); search();
+    };
+  }
+}
+
+// The folder panel on a phone: the children of one folder, and a way back to
+// the folder above it.
+//
+// Reads the same /api/tree payload the desktop does and emits the same rows
+// through the same node() builder, carrying the same data attributes -- so
+// selecting a folder filters the results through exactly the path it always
+// did, and nothing about fetching or rendering documents changes. What is
+// different is that a folder holding folders replaces the list rather than
+// expanding inside it, and that the rows carry no indent, trunk or elbow,
+// because at one level deep there is no ambiguity for them to resolve.
+function treePhone(t) {
+  const groups = t.groups || [];
+
+  // A level can vanish underneath you: Refresh rescans the archive, and a
+  // reference whose last document has been filed elsewhere is simply not in
+  // the next payload. So the path is walked against the data actually in
+  // hand and truncated where it stops matching, rather than rendering an
+  // empty panel with nothing in it to get out by.
+  let g = drill.length ? groups.find(x => x.name === drill[0]) : null;
+  if (drill.length && !g) drill = [];
+  let r = null;
+  if (g && drill.length > 1) {
+    r = (g.references || []).find(x => g.name + '/' + x.name === drill[1]) || null;
+    if (!r) drill = [g.name];
+  }
+
+  // The name of the level above, for the control that returns to it.
+  const up = r ? g.name : g ? 'Archive' : '';
+  // Escaped rather than typed, like the other non-ASCII punctuation in this
+  // file: a single angle quote is easy to mistake for a greater-than sign.
+  const here = r ? g.name + ' \u203a ' + r.name : g ? g.name : '';
+
+  let html = '<div class="drill-bar">' + (g
+    ? `<button type="button" class="drill-up">
+         <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+         <span class="lbl">${esc(up)}</span>
+       </button>`
+    : '<div class="drill-here">آرشیو</div>') +
+    `<button type="button" class="drill-close" aria-label="بستن پوشه‌ها">
+       <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
+     </button></div>`;
+
+  // How many folders are in the one being shown, phrased as folders because
+  // that is what the counts beside the rows mean too.
+  const heading = n => `<div class="drill-now"><span class="p">${esc(here)}</span>` +
+    `<span class="sub">${num(n)} پوشه</span></div>`;
+
+  if (!g) {
+    // The top level: everything, then the reference groups.
+    html += '<div role="tree" aria-label="آرشیو">' + node({
+      name: 'همهٔ اسناد', data: ' data-all="1"',
+      on: !filter.group && !filter.ref && !filter.category,
+    }) + '</div><div class="nav-sect">بر اساس شمارهٔ پرونده</div><div role="tree" aria-label="پوشه‌ها">';
+    for (const x of groups) {
+      html += node({
+        name: x.name, count: x.count,
+        on: filter.group === x.name && !filter.ref && !filter.category,
+        into: (x.references || []).length > 0,
+        data: ` data-g="${esc(x.name)}" data-path="${esc(x.name)}"`,
+      });
+    }
+  } else if (!r) {
+    // Inside a group: its references.
+    const refs = g.references || [];
+    html += heading(refs.length) + '<div role="tree" aria-label="پوشه‌ها">';
+    for (const x of refs) {
+      html += node({
+        name: x.name, count: x.count,
+        on: filter.ref === x.ref && !filter.category,
+        into: (x.categories || []).length > 0,
+        data: ` data-g="${esc(g.name)}" data-r="${esc(x.ref)}" data-rk="${esc(g.name + '/' + x.name)}" data-path="${esc(g.name + '/' + x.name)}"`,
+      });
+    }
+  } else {
+    // The deepest level: the document categories inside a reference.
+    const cats = r.categories || [];
+    html += heading(cats.length) + '<div role="tree" aria-label="پوشه‌ها">';
+    for (const x of cats) {
+      // These do carry a count, where the desktop's deliberately do not.
+      // There the document list is the next pane, already on screen; here it
+      // is the next screen, so the number of documents is worth knowing
+      // before spending a tap to go and look.
+      html += node({
+        name: x.name, count: x.count,
+        on: filter.ref === r.ref && filter.category === x.name,
+        data: ` data-g="${esc(g.name)}" data-r="${esc(r.ref)}" data-c="${esc(x.name)}" data-path="${esc(g.name + '/' + r.name + '/' + x.name)}"`,
+      });
+    }
+  }
+
+  $('side').classList.add('drill');
+  $('side').innerHTML = html + '</div>';
+
+  // Opened only now, with rows in it -- opening an empty panel and filling it
+  // a moment later reads as a glitch.
+  showFoldersFirst();
+
+  wireTreeKeys();
+  wireDocsRows();
+
+  // Up one level, not back to the top: someone comparing two references
+  // inside the same group would otherwise start again from the root every
+  // time. Only the drawer is rebuilt, so the results keep whatever they
+  // were filtered to on the way down -- which is also why the folder tapped
+  // to get here is still the selected row when you arrive back at it.
+  const upBtn = $('side').querySelector('.drill-up');
+  if (upBtn) upBtn.onclick = () => { drill = drill.slice(0, -1); tree(); };
+
+  $('side').querySelector('.drill-close').onclick =
+    () => document.body.classList.remove('nav-open');
+
+  for (const el of $('side').querySelectorAll('[data-all],[data-g]')) {
+    el.onclick = () => {
+      filter = filterOf(el);
+      // A folder with folders inside it goes down a level and the panel
+      // stays open showing them. Anything else is as deep as this branch
+      // goes, so the documents are what comes next, and the panel closing
+      // is handled where the rest of the phone navigation lives.
+      if (el.dataset.into) drill = el.dataset.rk ? [el.dataset.g, el.dataset.rk] : [el.dataset.g];
+      tree(); search();
+    };
+  }
+}
+
+// ---------- results ----------
+
+function highlight(text, query) {
+  const terms = String(query || '').replace(/["\u00ab\u00bb]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  let out = esc(text);
+  for (const t of terms) {
+    const safe = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try { out = out.replace(new RegExp('(' + safe + ')', 'gi'), '<mark>$1</mark>'); } catch {}
+  }
+  return out;
+}
+
+const emptyIcon = `<svg class="ic" aria-hidden="true"><use href="#i-file-text"/></svg>`;
+
+function placeholder(el, title, detail) {
+  el.innerHTML = `<div class="empty rise" style="height:100%">
+    <div>${emptyIcon}<b>${esc(title)}</b>${esc(detail)}</div>
+  </div>`;
+}
+
+// Skeleton rows while a search runs, so the pane shows the shape of what is
+// coming rather than going blank.
+function listSkeleton() {
+  // The skeleton says "rows are coming and roughly this shape"; the line above
+  // it says which of the several things this page does is happening. Grey bars
+  // alone read the same whether the search is running or the page has stalled.
+  $('list').innerHTML =
+    '<div class="searching" role="status">' +
+      '<span class="bead" aria-hidden="true"></span>' +
+      '<span class="word">در حال جستجو</span>' +
+    '</div>' +
+    '<div class="skel">' +
+    Array.from({ length: 6 }, (_, i) =>
+      `<i style="width:${92 - (i % 3) * 13}%;height:${i % 2 ? 13 : 34}px"></i>`).join('') +
+    '</div>';
+}
+
+placeholder($('view'), 'Select a document', 'Choose one from the list, or search above.');
+
+// Reading the box as a question, and showing what was understood.
+//
+// askMode is off by default and the server only interprets when asked, so the
+// ordinary search is untouched: the same words give the same results whether
+// or not this feature exists.
+let askMode = false;
+
+// interpHTML renders the reading above the results.
+//
+// Every line here comes from the server, which produced it FROM the filters it
+// applied -- not from a description of them. That is what makes the panel
+// worth showing: it cannot claim a filter that did not run. See
+// internal/find/nlquery.go.
+function interpHTML(inp) {
+  if (!inp) return '';
+  const chips = (inp.understood || []).map(u =>
+    `<span class="chip chip-plain" title="${esc(u.from)}">${esc(u.means)}</span>`).join('');
+  const dropped = (inp.unused || []).length
+    // Named rather than silently swallowed. A reader whose key word was taken
+    // for grammar needs to see that it was, or the results are inexplicable.
+    ? `<div class="meta" style="margin-top:6px">واژه‌های نادیده‌گرفته‌شده: ${
+        inp.unused.map(w => esc(w)).join('، ')}</div>`
+    : '';
+  return `<section class="notice rise" dir="rtl" style="margin-bottom:8px">
+      <div style="font-size:var(--text-sm)">${esc(inp.summary || '')}</div>
+      ${chips ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:7px">${chips}</div>` : ''}
+      ${dropped}
+    </section>`;
+}
+
+async function search() {
+  const q = $('q').value.trim();
+  $('clearQ').classList.toggle('on', !!q);
+  $('qHint').style.display = q ? 'none' : '';
+
+  listSkeleton();
+  let r;
+  try {
+    const params = { q, category: filter.category, group: filter.group, ref: filter.ref };
+    if (askMode) params.ask = '1';
+    r = await jget(api('/api/search', params));
+  } catch (e) {
+    placeholder($('list'), 'Something went wrong', problem(e));
+    return;
+  }
+
+  rows = r.results || [];
+  const where = filter.category ? ` in ${filter.category}`
+              : filter.ref ? ` in ${filter.ref}`
+              : filter.group ? ` in ${filter.group}` : '';
+  // r.total is how many documents matched; r.count is how many came back in
+  // this response. Reporting r.count made the header read "200 documents" for
+  // every broad search, because 200 is the server's result limit -- fine while
+  // the whole archive was smaller than that, wrong the moment it was not.
+  const total = r.total == null ? r.count : r.total;
+  const shown = total > r.count ? `, showing first ${num(r.count)}` : '';
+  $('count').textContent =
+    `${num(total)} document${total === 1 ? '' : 's'}${where}${shown} · ${num(r.took_ms)} ms`;
+
+  const interp = interpHTML(r.interpretation);
+
+  if (!rows.length) {
+    placeholder($('list'), 'Nothing found',
+      q ? 'Try fewer words, or part of a reference number.' : 'This folder is empty.');
+    // The reading goes ABOVE the "nothing found" notice, and this is the case
+    // it matters most in. An empty result after a question is the moment a
+    // reader most needs to see how their words were taken -- a month they did
+    // not mean, or a key word dropped as grammar, explains the emptiness and
+    // tells them what to change.
+    if (interp) $('list').insertAdjacentHTML('afterbegin', interp);
+    return;
+  }
+
+  // r.corrected lists any query word that matched nothing on its own and had
+  // to be fuzzy-matched to a real word in the archive -- shown so a result set
+  // built on a guess never looks like an exact match.
+  const correctedHint = r.corrected
+    ? `<div class="notice rise" style="margin-bottom:6px;font-size:var(--text-sm)">
+        Showing results for ${Object.entries(r.corrected).map(([typed, fixed]) =>
+          `<b>${esc(fixed)}</b> <span style="color:var(--fg-faint)">(typed "${esc(typed)}")</span>`).join(', ')}
+      </div>`
+    : '';
+
+  $('list').innerHTML = interp + correctedHint + rows.map((d, i) => `
+    <div class="row-item rise" data-i="${i}" tabindex="0" role="button"
+         style="animation-delay:${Math.min(i, 12) * 18}ms">
+      <div class="row" style="gap:var(--s2)">
+        <span class="ref">${esc(d.ref || '—')}</span>
+        <span class="chip chip-accent chip-plain">${esc(d.category)}</span>
+      </div>
+      <div class="meta">${esc(d.name)} · ${kb(d.size)} · ${esc(d.modified)}</div>
+      ${d.snippet ? `<div class="snip" dir="auto">${highlight(d.snippet, q)}</div>` : ''}
+    </div>`).join('');
+
+  for (const el of $('list').querySelectorAll('[data-i]')) {
+    const open = () => show(+el.dataset.i);
+    el.onclick = open;
+    // A row is operable by keyboard as well as mouse, which is why it carries
+    // a tabindex and a role above.
+    el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  }
+}
+
+// viewMode is remembered between documents: someone checking a run of
+// invoices wants the same view each time, not a mode that resets.
+let viewMode = 'document';
+
+// Below the breakpoint the document is not previewed at all -- not hidden
+// after the fact, not built and then covered: never fetched.
+//
+// Three reasons, and the first two cannot be styled away:
+//
+//   * A .docx carries fixed page geometry. Measured on a 360px viewport, the
+//     rendered page is 794px wide inside a 360px pane (#docBody scrollWidth
+//     806) and the header image inside it is 699px. That is two axes of
+//     panning to read one inquiry, with no zoom-to-fit.
+//   * Getting there costs the file plus the renderer every time a row is
+//     tapped: 235 KB for /api/doc on the first document measured, 28 KB for
+//     jszip and 21 KB for docx-preview -- 285 KB over the wire, on a
+//     connection that is metered precisely because it is a phone.
+//   * The desktop escape hatch does not exist here. "Open in Word" posts to
+//     /api/open, which runs openInShell() on the *server* and is admin-only
+//     anyway. On a phone it would open Word on a PC in the office.
+//
+// So the phone gets the file's identity and the one control that does work
+// there: Download, as an <a download> rather than a location.href, because
+// the server serves PDFs and images with Content-Disposition: inline and a
+// bare navigation would replace the application with a viewer.
+// A phone in either orientation.
+//
+// This was width alone, at 820px -- which an iPhone exceeds the moment it is
+// turned sideways: an iPhone 14 in landscape is 844px wide and a 15 Pro Max
+// is 956. So the preview came back on exactly the device the whole handoff
+// exists for, and the reason it was unreadable in portrait -- a .docx carries
+// fixed page geometry, 794px of it -- is no better in landscape, where there
+// are only 390 pixels of height to read it in.
+//
+// The short axis is the orientation-independent fact. Every iPhone is at most
+// 480px on its narrow side; no iPad is under 744. The pointer test keeps a
+// narrow desktop window out of it -- that has hover, "Open in Word", and a
+// user who can widen it.
+const phoneView = window.matchMedia(
+  '(max-width: 820px), (pointer: coarse) and (max-height: 480px)');
+
+// The Word editor (office.go), for the formats it saves as themselves; shown
+// once /api/me has said the server has one.
+function wordButton(d) {
+  if (!/\.(docx|xlsx|pptx)$/i.test(d.name)) return '';
+  return `<a class="btn btn-sm word-btn" href="/office?id=${encodeURIComponent(d.id)}"${window.docfindOffice ? '' : ' hidden'}
+       title="ویرایش در Word">Edit in Word</a>`;
+}
+
+function renderHandoff(d) {
+  const href = api('/api/doc', { id: d.id, mode: 'download' });
+  // On a phone the facts matter most: the page itself is not readable here.
+  setTimeout(() => loadDocFacts(d.id));
+  $('view').innerHTML = `
+    <div class="doc-bar">
+      <span class="doc-title">${esc(d.name)}</span>
+      <a class="btn btn-primary btn-sm" href="${esc(href)}" download="${esc(d.name)}">
+        <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+        Download
+      </a>
+      ${wordButton(d)}
+    </div>
+    <div id="docFacts" class="doc-facts" hidden></div>
+    <div id="docBody">
+      <div class="doc-hand rise">
+        <svg class="ic" aria-hidden="true"><use href="#i-file-text"/></svg>
+        <b>${esc(d.name)}</b>
+        <div class="hand-meta">${esc(d.ref || '\u2014')} \u00b7 ${esc(d.category)} \u00b7 ${kb(d.size)} \u00b7 ${esc(d.modified)}</div>
+        <p class="hand-note">A Word document is laid out for a printed page, which a phone cannot show at a readable size. Download it to open it here, or read just the words.</p>
+        <div class="hand-acts">
+          <a class="btn btn-primary" href="${esc(href)}" download="${esc(d.name)}">Download the document</a>
+          <button id="handText" type="button" class="btn">Read the text instead</button>
+        </div>
+      </div>
+    </div>`;
+  // The words alone are a JSON response rather than the binary, and they
+  // reflow: measured 326/326 inside a 390px screen. Nothing is fetched until
+  // this is tapped.
+  $('handText').onclick = () => {
+    $('docBody').innerHTML = '<div class="skel"><i style="height:340px"></i></div>';
+    fillTextBody(d);
+  };
+}
+
+// The folders are the first screen on a phone.
+//
+// Not the results, because an archive of two hundred documents opens as an
+// undifferentiated list and the reader's first question is which reference
+// they want. The drawer is full width and drills one level at a time, so it
+// is a screen in its own right rather than a panel over the results -- which
+// is also why the "Folders" button is gone: it pointed at where you already
+// are.
+//
+// Once only. Someone who closes it to read a document and then searches
+// should not have it reappear over their results on the next render.
+let foldersShown = false;
+function showFoldersFirst() {
+  if (foldersShown || !phoneView.matches) return;
+  foldersShown = true;
+  document.body.classList.add('nav-open');
+}
+
+// A tablet rotated across the breakpoint would otherwise keep whichever of the
+// two views it was on. Additive and fails closed if the event never arrives.
+//
+// The folder panel has the same two presentations for the same reason, and a
+// window dragged narrow is the case that shows it: the panel is only rebuilt
+// when something is browsed, so without this a desktop that became a phone
+// would keep a tree it no longer has the width for until the next tap.
+phoneView.addEventListener('change', () => { if (rows[sel]) renderDoc(); tree(); });
+
+async function show(i) {
+  if (i < 0 || i >= rows.length) return;
+  sel = i;
+  for (const el of $('list').querySelectorAll('[data-i]')) {
+    const on = +el.dataset.i === i;
+    el.classList.toggle('on', on);
+    el.setAttribute('aria-current', on ? 'true' : 'false');
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  }
+  await renderDoc();
+}
+
+// What the document names, above it (docfacts.go): its amounts and payment
+// terms, its reference numbers and its dates, each a piece of its own text.
+// A reference searches the archive for the other documents that carry it.
+// A document that names none of these gets no strip at all.
+const factsFor = new Map();
+async function loadDocFacts(id) {
+  let f = factsFor.get(id);
+  if (!f) {
+    try {
+      const r = await fetch(api('/api/doc/facts', { id }), { credentials: 'same-origin' });
+      if (!r.ok) return;
+      f = await r.json();
+      factsFor.set(id, f);
+    } catch (_) { return; }
+  }
+  const box = $('docFacts');
+  if (!box || !rows[sel] || rows[sel].id !== id) return;
+  const chips = (xs, attr) => xs.map(x => attr
+    ? `<button type="button" class="chip chip-accent" ${attr}="${esc(x)}" dir="auto">${esc(x)}</button>`
+    : `<span class="chip chip-plain" dir="auto">${esc(x)}</span>`).join('');
+  const group = (label, html) => html ? `<div class="fact"><span class="fact-k">${label}</span>${html}</div>` : '';
+  const html =
+    group('Amounts', chips(f.amounts || [])) +
+    group('Payment', chips(f.payments || [])) +
+    group('References', chips(f.refs || [], 'data-find')) +
+    group('Dates', chips(f.dates || []));
+  box.innerHTML = html;
+  box.hidden = !html;
+}
+
+// A reference in the strip: the other documents of the same order, invoice
+// or tender, by searching for it. On a phone that is the results screen.
+$('view').addEventListener('click', e => {
+  const b = e.target.closest('[data-find]');
+  if (!b) return;
+  $('q').value = b.dataset.find;
+  document.body.classList.remove('show-view');
+  search();
+});
+
+async function renderDoc() {
+  const d = rows[sel];
+  if (!d) return;
+
+  // Before anything is fetched, on purpose.
+  if (phoneView.matches) { renderHandoff(d); return; }
+
+  // The title and buttons never depend on how the body ends up rendering, so
+  // they go up immediately -- the row already carries the name, no fetch
+  // needed -- and the body fills in underneath once it's ready.
+  $('view').innerHTML = `
+    <div class="doc-bar">
+      <span class="doc-title">${esc(d.name)}</span>
+      <span id="docNote" class="dx-note" style="display:none"></span>
+      <div class="seg" role="group" aria-label="View mode">
+        <button id="mDoc" type="button" class="${viewMode === 'document' ? 'on' : ''}"
+                aria-pressed="${viewMode === 'document'}">Document</button>
+        <button id="mText" type="button" class="${viewMode === 'text' ? 'on' : ''}"
+                aria-pressed="${viewMode === 'text'}">Text</button>
+      </div>
+      <button id="dlBtn" type="button" class="btn btn-primary btn-sm">
+        <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+        Download
+      </button>
+      ${wordButton(d)}
+    </div>
+    <div id="docFacts" class="doc-facts" hidden></div>
+    <div id="docBody">
+      <div class="skel"><i style="height:340px"></i></div>
+    </div>`;
+  loadDocFacts(d.id);
+
+  $('mDoc').onclick = () => { if (viewMode !== 'document') { viewMode = 'document'; renderDoc(); } };
+  $('mText').onclick = () => { if (viewMode !== 'text') { viewMode = 'text'; renderDoc(); } };
+
+  // "Open in Word" was here and is gone, per request. It posted to /api/open,
+  // which opens the file on the SERVER's desktop -- useful when the server was
+  // the machine you were sitting at, and misleading the moment it is not.
+  // Download is the honest way to open a copy in Word.
+  $('dlBtn').onclick = () => { location.href = api('/api/doc', { id: d.id, mode: 'download' }); };
+
+  if (viewMode === 'text') await fillTextBody(d);
+  else await fillDocumentBody(d);
+}
+
+function docNote(msg) {
+  const el = $('docNote');
+  if (!el) return; // the view moved on (another document, or view mode) while this was loading
+  el.style.display = msg ? 'inline' : 'none';
+  el.textContent = msg;
+}
+
+async function fillTextBody(d) {
+  const body = $('docBody');
+  const q = $('q').value.trim();
+  let full;
+  try {
+    full = await jget(api('/api/doc', { id: d.id, mode: 'text' }));
+  } catch (e) {
+    placeholder(body, 'Could not open it', problem(e));
+    return;
+  }
+  fillTextBodyContent(body, full.text, q);
+}
+
+// fillDocumentBody renders the actual document, laid out the way Word lays it
+// out: headers, footers, footnotes, real page geometry, page breaks in the
+// right places. docx-preview does that by parsing the .docx directly in the
+// browser -- the server-side renderer intentionally does not attempt page
+// geometry at all (see internal/docxhtml), so it stays as the fallback for
+// whatever docx-preview cannot open, and plain text stays the fallback after
+// that. A document is never left blank just because the best available
+// renderer for it had a bad day.
+
+// The document renderer is fetched on demand.
+//
+// jszip and docx-preview are 173 KB together -- 49 KB gzipped -- and neither
+// is touched until somebody opens a .docx. Loading them in the <head> put
+// that download and parse on the critical path of a screen whose first job is
+// to search, which most visits never leave.
+let docxReady = null;
+function loadDocxRenderer() {
+  if (docxReady) return docxReady;
+  const one = src => new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = resolve;
+    el.onerror = () => reject({ kind: 'http', message: 'could not load ' + src });
+    document.head.appendChild(el);
+  });
+  // Sequential, not parallel: docx-preview expects JSZip to already be there.
+  docxReady = one('/vendor/jszip.min.js').then(() => one('/vendor/docx-preview.min.js'));
+  // A failed load must not be cached as a permanent failure; the next attempt
+  // should be allowed to try again.
+  docxReady.catch(() => { docxReady = null; });
+  return docxReady;
+}
+
+async function fillDocumentBody(d) {
+  const body = $('docBody');
+  const q = $('q').value.trim();
+
+  try {
+    // Fetching the file and fetching the renderer are independent, so they
+    // overlap rather than queue.
+    const [r] = await Promise.all([fetch(api('/api/doc', { id: d.id })), loadDocxRenderer()]);
+    if (r.status === 401) throw signInAgain();
+    if (r.status === 403) throw { kind: 'token' };
+    if (!r.ok) throw { kind: 'http', message: r.status + ' ' + r.statusText };
+    const blob = await r.blob();
+
+    const host = document.createElement('div');
+    host.className = 'dx-host';
+    body.innerHTML = '';
+    body.appendChild(host);
+
+    await docx.renderAsync(blob, host, host, {
+      inWrapper: true,
+      ignoreLastRenderedPageBreak: true,
+      useBase64URL: true, // no object URLs left behind when the next document replaces this one
+      // An altChunk is an OOXML part that can embed arbitrary HTML; the
+      // library's default renders it by setting an <iframe>'s srcdoc to that
+      // HTML verbatim, unsandboxed, in the app's own origin -- a script inside
+      // it could read this page's token from the URL and call the API with
+      // it. Nothing this business generates uses altChunks, so the honest fix
+      // is not rendering them at all rather than trying to sandbox a feature
+      // nothing here needs.
+      renderAltChunks: false,
+    });
+    if (rows[sel] !== d) return; // moved on while this was rendering
+    setDocDirection(host);
+    host.classList.add('rise'); // added post-render, so the fade coincides with content actually appearing
+    if (q) markMatches(host, q);
+    return;
+  } catch (err) {
+    if (rows[sel] !== d) return;
+    logClientIssue('docx-preview could not render this document, falling back', err);
+  }
+
+  // Fall back to the server's own renderer.
+  try {
+    const full = await jget(api('/api/doc', { id: d.id, mode: 'html' }));
+    if (rows[sel] !== d) return;
+    if (full.html) {
+      body.innerHTML = `<div class="sheet rise">${full.html}</div>`;
+      // The server's renderer gets the same per-document decision as
+      // docx-preview's output; it is the same archive either way.
+      setDocDirection(body.firstElementChild);
+      docNote(full.error ? `Shown with reduced fidelity: ${full.error}` : 'Shown with reduced fidelity.');
+      if (q) markMatches(body, q);
+      return;
+    }
+    // Neither renderer produced markup; fall through to text.
+    fillTextBodyContent(body, full.text, q);
+    docNote(full.error ? `Shown as text: ${full.error}` : 'Shown as text.');
+  } catch (e) {
+    placeholder(body, 'Could not open it', problem(e));
+  }
+}
+
+function fillTextBodyContent(body, text, q) {
+  body.innerHTML = `<div class="sheet rise"><div class="textfallback" dir="auto">${
+    text ? highlight(text, q) : '<span class="dx-note">No text could be read from this file.</span>'
+  }</div></div>`;
+}
+
+// logClientIssue keeps a quiet trail in the console for whoever's debugging a
+// document that would not render, without interrupting the person reading it
+// with a toast for something the fallback chain already handled.
+function logClientIssue(context, err) {
+  try { console.warn(context, err); } catch {}
+}
+
+// markMatches highlights search terms inside the rendered document by walking
+// text nodes, so the document's own markup is never rewritten.
+// setDocDirection decides which way ONE rendered document reads, from that
+// document's own text.
+//
+// The archive is mixed and the mix is per FILE, not per folder: case 507-068
+// holds inquiry_acme_english_507-068.docx beside its Persian twin. So there
+// is no blanket answer. Pinning the pane left-to-right mangled the Persian
+// quotations -- their label colons jumped to the far end of the line and the
+// dotted leaders ran backwards -- and flipping the pin to right-to-left did
+// exactly the same damage to the English ones. Same bug, opposite sign.
+//
+// Counting letters rather than trusting the file name, because the name is a
+// convention and the content is the fact: "anfrage_acme_507-069.docx" is
+// German, "507-071" says nothing at all, and a Persian document with an
+// English name would be misread by any rule based on the name.
+//
+// A simple majority is the right test and not a lazy one. These are business
+// documents, not bilingual prose: a Persian quotation carries Latin figures,
+// part numbers, currency codes and an IBAN, and an English one carries almost
+// no Persian. The two populations are nowhere near the boundary, so the
+// decision is not delicate -- and a document with no letters at all (a scan,
+// an empty page) correctly changes nothing.
+function setDocDirection(host) {
+  const text = host.textContent || '';
+  let rtl = 0, ltr = 0;
+  for (const ch of text) {
+    if (joiner.test(ch)) rtl++;
+    else if (ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z') ltr++;
+  }
+  if (rtl > ltr) {
+    host.setAttribute('dir', 'rtl');
+    // docx-preview builds its own wrapper inside the host, and that wrapper
+    // is what the stylesheet targets, so the attribute goes on both.
+    host.querySelectorAll('.docx-wrapper').forEach(w => w.setAttribute('dir', 'rtl'));
+  }
+}
+
+function markMatches(root, query) {
+  const terms = String(query).replace(/["«»]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  if (!terms.length) return;
+
+  const safe = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  let re;
+  try { re = new RegExp('(' + safe + ')', 'gi'); } catch { return; }
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentNode && n.parentNode.nodeName !== 'MARK' && n.nodeValue.trim()
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const targets = [];
+  while (walker.nextNode()) targets.push(walker.currentNode);
+
+  for (const node of targets) {
+    if (!re.test(node.nodeValue)) { re.lastIndex = 0; continue; }
+    re.lastIndex = 0;
+    const text = node.nodeValue;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      // Grow the match out to whole-word boundaries before marking it. See
+      // wordSpan: a <mark> that starts or ends INSIDE a Persian word breaks
+      // the word in half on screen.
+      const [from, to] = wordSpan(text, m.index, m.index + m[0].length);
+      if (from > last) frag.appendChild(document.createTextNode(text.slice(last, from)));
+      // A previous match may already have covered this one once both were
+      // grown to the same word; skip it rather than emit an empty <mark>.
+      if (to > Math.max(last, from)) {
+        const mark = document.createElement('mark');
+        mark.textContent = text.slice(Math.max(last, from), to);
+        frag.appendChild(mark);
+      }
+      last = Math.max(last, to);
+      if (m[0].length === 0) re.lastIndex++;
+      else re.lastIndex = Math.max(re.lastIndex, last);
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  }
+}
+
+// joiner matches the characters that make up a word in a JOINING script --
+// Arabic and Persian letters, their presentation forms, and the zero-width
+// non-joiner Persian uses inside compounds like "می‌شود".
+const joiner = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿‌‍]/;
+
+// wordSpan widens [from,to) to cover the whole word when the match lands
+// inside one written in a joining script.
+//
+// THIS IS THE "جمع ن هایی" BUG. Searching for a term that appears mid-word --
+// and in Persian that is the normal case, because the definite, plural and
+// possessive endings are suffixes -- put a <mark> boundary between two letters
+// that are supposed to be joined. Arabic script is cursive: every letter has
+// an initial, medial, final and isolated form, and the browser picks between
+// them by looking at the neighbours WITHIN one text node. Split "نهایی" across
+// an element boundary and the shaper can no longer see that the "ن" has a
+// letter after it, so it draws the isolated form and the word appears on
+// screen as two broken pieces with a gap.
+//
+// No amount of CSS on the <mark> fixes that; the break is in text shaping, not
+// in layout. The fix is to not put the boundary there. Marking the whole word
+// highlights slightly more than was typed, which is the right trade: the
+// reader is being shown WHERE the term is, and a Persian reader looking for
+// "نهایی" is looking for the word, not for five of its letters.
+//
+// Latin text is unaffected -- it joins nothing, so the guard below never fires
+// and an English match is still marked exactly as typed.
+function wordSpan(text, from, to) {
+  if (!joiner.test(text.slice(from, to))) return [from, to];
+  while (from > 0 && joiner.test(text[from - 1])) from--;
+  while (to < text.length && joiner.test(text[to])) to++;
+  return [from, to];
+}
+
+// ---------- wiring ----------
+
+$('q').oninput = () => {
+  clearTimeout(timer);
+  timer = setTimeout(search, 110);
+  // Typing is a decision to search rather than browse, so the folder panel
+  // gets out of the way.
+  //
+  // Without this, searching on a phone looked broken: the query ran, the
+  // results changed underneath -- measured, 200 documents down to 139 -- and
+  // the reader saw none of it, because the folder panel opens by default now
+  // and is full width. elementFromPoint over the results pane returned a
+  // folder row. The search was working; only the answer was hidden.
+  //
+  // Once, and only while the panel is the one that opened itself. Somebody
+  // who deliberately reopens folders with a query still in the box is
+  // browsing on purpose and should not have it shut on the next keystroke.
+  const typed = $('q').value.trim();
+  if (phoneView.matches && typed && !searchTookOver) {
+    searchTookOver = true;
+    document.body.classList.remove('nav-open');
+  }
+  // Emptied: the next search starts from the same footing as the first.
+  if (!typed) searchTookOver = false;
+};
+// Whether searching has already claimed the screen from the folder panel.
+// Reset when the field is emptied, so clearing a search and starting again
+// behaves the same way the first search did.
+let searchTookOver = false;
+$('q').addEventListener('focus', () => { $('qHint').style.display = 'none'; });
+$('q').addEventListener('blur', () => { $('qHint').style.display = $('q').value.trim() ? 'none' : ''; });
+$('clearQ').onclick = () => {
+  $('q').value = '';
+  searchTookOver = false;
+  $('q').focus();
+  search();
+};
+
+// The question toggle.
+//
+// Remembered in localStorage, because somebody who works in Persian will want
+// it on every time and somebody who searches by reference number will want it
+// off every time, and neither should have to say so twice. Wrapped in
+// try/catch: a browser with site data blocked throws on access, and the toggle
+// still has to work.
+$('askToggle').addEventListener('click', () => {
+  askMode = !askMode;
+  $('askToggle').classList.toggle('btn-primary', askMode);
+  $('askToggle').setAttribute('aria-pressed', String(askMode));
+  $('q').placeholder = askMode
+    ? 'مثلاً: پیش‌فاکتورهای تیر ۱۴۰۴'
+    : 'Reference number, or any words inside the documents…';
+  try { localStorage.setItem('docfind.ask', askMode ? '1' : '0'); } catch {}
+  search();
+});
+try {
+  if (localStorage.getItem('docfind.ask') === '1') $('askToggle').click();
+} catch {}
+
+$('refreshBtn').onclick = async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  // A rescan re-reads whatever changed, and for a scanned PDF that means OCR
+  // with a 90-second budget per page. This is the longest wait in the app, so
+  // it always deserves the loader -- busy() reveals it after 300ms.
+  try {
+    await busy((async () => {
+      await jpost(api('/api/rescan'));
+      await tree();
+      await search();
+    })());
+    toast('Up to date.');
+  } catch (err) { toast(problem(err), true); }
+  btn.disabled = false;
+};
+
+document.addEventListener('keydown', e => {
+  if ($('app').classList.contains('hidden')) return;
+  if (e.key === '/' && document.activeElement !== $('q')) { e.preventDefault(); $('q').focus(); return; }
+  if (e.key === 'Escape') { $('q').value = ''; $('q').focus(); search(); return; }
+  if (!rows.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); show(Math.min((sel ?? -1) + 1, rows.length - 1)); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); show(Math.max((sel ?? 1) - 1, 0)); }
+});
+
+(async () => {
+  try {
+    const s = await jget(api('/api/status'));
+    if (s.needs_setup) { showSetup(s.setup_reason); return; }
+    hideBoot();
+    $('app').classList.remove('hidden');
+    $('app').classList.add('flex');
+    // Before the first tree, because wireDocsRows reads these to decide
+    // whether a row gets a menu at all. After it, and the first draw would
+    // be inert until something redrew it.
+    await loadDocsPerm();
+    await tree();
+    // ?q= opens the archive already searching -- how a link to a proforma or
+    // order number lands here, the search palette's among them.
+    const q0 = new URLSearchParams(location.search).get('q');
+    if (q0) $('q').value = q0;
+    await search();
+    $('q').focus();
+  } catch (e) {
+    showSetup(problem(e));
+  }
+})();
+
+// ---------------------------------------------------------------------------
+// Accounts and installable-app bootstrap.
+//
+// Both are additive: on the desktop build the server reports accounts are off,
+// nothing is shown, and this file behaves exactly as it did before.
+(async function accountsAndPWA() {
+  let isAdmin = false, who = null, account = null;
+  const signOut = () => fetch('/api/logout', { method: 'POST', credentials: 'same-origin' })
+    .finally(() => location.replace('/login'));
+
+  try {
+    const me = await (await fetch('/api/me', { credentials: 'same-origin' })).json();
+    // The account carries the display preferences; the copy applied before
+    // paint came from this browser's cache, so reconcile them here.
+    if (window.docfindPrefs) window.docfindPrefs.write((me.user && me.user.prefs) || null);
+    if (me.auth_enabled) {
+      if (!me.user) {
+        // Not signed in: the API calls above will have failed with 401 and
+        // the page is useless, so send them to sign in.
+        location.replace('/login?next=' + encodeURIComponent(location.pathname));
+        return;
+      }
+      const u = me.user;
+      who = u.display_name || u.username;
+      isAdmin = u.role === 'admin';
+      // Kept out here because buildNav runs after this block closes; the
+      // account object itself is const and scoped to the try.
+      account = u;
+      window.docfindOffice = !!u.has_office;
+      document.querySelectorAll('.word-btn').forEach(b => { b.hidden = !window.docfindOffice; });
+      $('navUser').textContent = who;
+      $('navUser').classList.remove('hidden');
+      $('navSignOut').classList.remove('hidden');
+      // Managing users is an administrator's job; hiding the link for
+      // everyone else keeps the toolbar honest about what they can do. The
+      // page and the API both check again on their own.
+      if (isAdmin) $('navSettings').classList.remove('hidden');
+      $('navSignOut').addEventListener('click', signOut);
+    }
+  } catch (e) {
+    // Never let this stop the document browser from working.
+  }
+
+  // The phone menu is built once the answers are in, so it lists only the
+  // places this person can actually reach.
+  if (typeof buildNav === 'function') {
+    // navlinks:false -- this toolbar is in English on purpose and already
+    // carries its own destinations. The phone sheet is still built.
+    buildNav({ admin: isAdmin, user: who, account: account,
+               navlinks: false, onSignOut: who ? signOut : null });
+  }
+
+  // The worker is registered by nav.js, which this page already loads. It was
+  // done here too, and on two other pages, and not at all on the three that
+  // needed it just as much -- so it moved to the one file they all share.
+})();
+
+// ---------------------------------------------------------------------------
+// Phone navigation.
+//
+// On a narrow screen the three panes are one screen at a time (see the media
+// query in the head), so these move between them. On a wide screen the
+// buttons are hidden and the body classes have no styling attached, which is
+// why none of this needs a width check.
+(function phoneNav() {
+  const body = document.body;
+  const closeNav = () => body.classList.remove('nav-open');
+
+  // The Folders button is gone -- the folder list is the first screen now, so
+  // the control pointed at where the reader already was. Getting back to it
+  // from the results is the menu's job, which is why the sheet carries the
+  // archive as a destination.
+  $('navBack').addEventListener('click', () => body.classList.remove('show-view'));
+  $('scrim').addEventListener('click', closeNav);
+
+  // Opening a document moves to the document screen; picking a folder moves
+  // back to the results, since that is what was just filtered.
+  $('list').addEventListener('click', e => {
+    if (e.target.closest('[data-i]')) body.classList.add('show-view');
+  });
+  $('side').addEventListener('click', e => {
+    const row = e.target.closest('[data-all],[data-g]');
+    if (!row) return;
+    // Either way the results behind have just been refiltered, so the
+    // document screen is no longer showing anything that belongs to them.
+    body.classList.remove('show-view');
+    // A folder that drills into another level keeps the panel open -- the
+    // whole point of the tap was to see what is inside. Closing on every
+    // tap is what made the levels below the first unreachable: the drawer
+    // dismissed itself the moment it had something new to show.
+    if (row.dataset.into) return;
+    closeNav();
+  });
+})();
+</script>
+</body>
+</html>
